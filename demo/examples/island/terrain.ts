@@ -62,17 +62,23 @@ function fbm(x: number, z: number, seed: number): number {
 }
 
 function terrainHeight(x: number, z: number, seed: number, halfSize: number): number {
-  const angle = Math.atan2(z, x);
+  // Offset and slightly shear the radial frame so the coast does not read as
+  // a centered ellipse. Harmonics at co-prime frequencies make coves and
+  // headlands without creating a repeating scalloped edge.
+  const coastX = x + 1.2 + z * 0.025;
+  const coastZ = z - 0.65 - x * 0.018;
+  const angle = Math.atan2(coastZ, coastX);
   const coastline = 1
-    + Math.sin(angle * 3 + 0.45) * 0.055
-    + Math.sin(angle * 5 - 1.15) * 0.035
-    + valueNoise(x * 0.11, z * 0.11, seed ^ 0x72a4) * 0.055;
-  const radial = Math.hypot(x * 0.96, z * 1.04) / (halfSize * coastline);
-  const land = 1 - smoothstep(0.54, 0.94, radial);
+    + Math.sin(angle * 3 + 0.45) * 0.082
+    + Math.sin(angle * 5 - 1.15) * 0.052
+    + Math.sin(angle * 7 + 0.72) * 0.032
+    + valueNoise(coastX * 0.13, coastZ * 0.13, seed ^ 0x72a4) * 0.07;
+  const radial = Math.hypot(coastX * 0.95, coastZ * 1.05) / (halfSize * coastline);
+  const land = 1 - smoothstep(0.5, 0.92, radial);
   const broad = fbm(x, z, seed);
   const longRidge = Math.sin(x * 0.13 - z * 0.075) * 0.34;
   const crown = Math.max(0, 1 - radial) * 0.72;
-  return -1.2 + land * (3.15 + broad * 1.18 + longRidge + crown);
+  return -1.35 + land * (3.4 + broad * 1.12 + longRidge + crown);
 }
 
 function vertexIndex(segments: number, column: number, row: number): number {

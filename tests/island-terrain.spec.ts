@@ -30,6 +30,24 @@ describe('island terrain example', () => {
     }
   });
 
+  it('forms an asymmetric coast with distinct coves and headlands', () => {
+    const field = createIslandHeightfield();
+    const radii: number[] = [];
+    for (let index = 0; index < 32; index++) {
+      const angle = index / 32 * Math.PI * 2;
+      let coast = 0;
+      for (let radius = 1; radius < field.size / 2; radius += field.cellSize / 2) {
+        if (field.heightAt(Math.cos(angle) * radius, Math.sin(angle) * radius) <= ISLAND_SEA_LEVEL) {
+          coast = radius;
+          break;
+        }
+      }
+      radii.push(coast);
+    }
+    expect(Math.min(...radii)).toBeGreaterThan(field.size * 0.27);
+    expect(Math.max(...radii) - Math.min(...radii)).toBeGreaterThan(field.size * 0.08);
+  });
+
   it('samples the same two triangles used by each terrain mesh quad', () => {
     const field = createIslandHeightfield(ISLAND_SEED, 20, 10);
     const stride = field.segments + 1;

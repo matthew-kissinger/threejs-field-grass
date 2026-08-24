@@ -14,7 +14,8 @@ function buildTerrainGeometry(field: IslandHeightfield): THREE.BufferGeometry {
   const positions = new Float32Array(stride * stride * 3);
   const colors = new Float32Array(stride * stride * 3);
   const indices = new Uint32Array(field.segments * field.segments * 6);
-  const sand = new THREE.Color('#aeb47b');
+  const submerged = new THREE.Color('#486b68');
+  const coastalStone = new THREE.Color('#738577');
   const meadow = new THREE.Color('#6f8758');
   const upland = new THREE.Color('#829365');
 
@@ -26,9 +27,12 @@ function buildTerrainGeometry(field: IslandHeightfield): THREE.BufferGeometry {
       positions[at] = -half + column * field.cellSize;
       positions[at + 1] = height;
       positions[at + 2] = -half + row * field.cellSize;
-      const shoreBlend = THREE.MathUtils.smoothstep(height, ISLAND_SEA_LEVEL - 0.05, 0.65);
+      const wetBlend = THREE.MathUtils.smoothstep(height, ISLAND_SEA_LEVEL - 0.18, 0.22);
+      const meadowBlend = THREE.MathUtils.smoothstep(height, 0.12, 0.82);
       const uplandBlend = THREE.MathUtils.smoothstep(height, 1.8, 3.6);
-      const color = mixColor(sand, meadow, shoreBlend).lerp(upland, uplandBlend * 0.48);
+      const color = mixColor(submerged, coastalStone, wetBlend)
+        .lerp(meadow, meadowBlend)
+        .lerp(upland, uplandBlend * 0.48);
       colors[at] = color.r;
       colors[at + 1] = color.g;
       colors[at + 2] = color.b;
@@ -68,8 +72,8 @@ export function IslandTerrainView({ field }: { readonly field: IslandHeightfield
         <meshStandardMaterial vertexColors roughness={0.98} metalness={0} />
       </mesh>
       <mesh rotation-x={-Math.PI / 2} position-y={ISLAND_SEA_LEVEL + 0.015}>
-        <planeGeometry args={[field.size * 3, field.size * 3, 1, 1]} />
-        <meshStandardMaterial color="#75a5a7" roughness={0.38} metalness={0} />
+        <planeGeometry args={[field.size * 12, field.size * 12, 1, 1]} />
+        <meshStandardMaterial color="#6f9b9a" roughness={0.48} metalness={0} />
       </mesh>
     </>
   );

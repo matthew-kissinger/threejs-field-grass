@@ -70,9 +70,17 @@ function createRenderer(props: ConstructorParameters<typeof THREE.WebGPURenderer
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.03;
-    const actualBackend = renderer.backend.constructor.name.toLowerCase().includes('webgpu')
-      ? 'webgpu'
-      : 'webgl2';
+    // Constructor names are minified in the production demo, so they cannot
+    // prove which backend Three selected. These flags are the renderer's stable
+    // runtime contract and remain intact in bundled code.
+    const backend = renderer.backend as typeof renderer.backend & {
+      readonly isWebGPUBackend?: boolean;
+      readonly isWebGLBackend?: boolean;
+    };
+    const actualBackend = backend.isWebGPUBackend === true ? 'webgpu' : 'webgl2';
+    if (backend.isWebGPUBackend !== true && backend.isWebGLBackend !== true) {
+      throw new Error('Three.js renderer initialized an unknown backend');
+    }
     window.__FIELD_GRASS_QA__ = {
       requestedBackend: forceWebGL ? 'webgl2' : 'webgpu',
       actualBackend,
@@ -155,7 +163,7 @@ function OrbitCamera({
     controls.zoomToCursor = true;
     const reset = () => {
       if (scene === 'island') {
-        if (size.width / size.height < 0.78) camera.position.set(-51, 38, 56);
+        if (size.width / size.height < 0.78) camera.position.set(-43, 32, 48);
         else camera.position.set(-31, 24, 34);
         controls.target.set(0, 1.1, 0);
       } else {
@@ -529,7 +537,7 @@ function Demo() {
         <Canvas
           gl={createRenderer as never}
           dpr={[1, 1.6]}
-          camera={{ position: [-24, 20, 30], fov: 40, near: 0.1, far: 120 }}
+          camera={{ position: [-24, 20, 30], fov: 40, near: 0.1, far: 180 }}
           shadows={false}
           fallback={<p className="canvas-fallback">This browser cannot start the 3D renderer.</p>}
         >
@@ -568,7 +576,7 @@ function Demo() {
           <div className="view-buttons" role="group" aria-label="View controls">
             <button type="button" aria-label="Zoom out" onClick={() => cameraActions.current?.zoom(1.2)}>−</button>
             <button type="button" aria-label="Zoom in" onClick={() => cameraActions.current?.zoom(0.82)}>+</button>
-            <button type="button" onClick={() => cameraActions.current?.reset()}>Reset view</button>
+            <button type="button" aria-label="Reset view" onClick={() => cameraActions.current?.reset()}>Reset</button>
           </div>
           <div className="look-switch" role="group" aria-label="Grass look">
             {(Object.keys(LOOKS) as LookName[]).map((name) => (
@@ -584,9 +592,17 @@ function Demo() {
         {mode === 'drive' ? <DirectionPad intent={intent} /> : null}
         <div className="demo-help">
           {mode === 'drive' ? (
-            <p><strong>{sceneName === 'island' ? 'Island' : 'Drive'}</strong> WASD, arrows, or direction pad. Wheel or pinch to zoom.</p>
+            <p>
+              <strong>{sceneName === 'island' ? 'Island' : 'Drive'}</strong>{' '}
+              <span className="help-long">WASD, arrows, or direction pad. Wheel or pinch to zoom.</span>
+              <span className="help-short">Pad moves. Pinch zooms.</span>
+            </p>
           ) : (
-            <p><strong>Orbit</strong> drag the field. Wheel, pinch, or use −/+ to zoom.</p>
+            <p>
+              <strong>Orbit</strong>{' '}
+              <span className="help-long">drag the field. Wheel, pinch, or use −/+ to zoom.</span>
+              <span className="help-short">Drag to orbit. Pinch zooms.</span>
+            </p>
           )}
         </div>
         <BackendBadge />
