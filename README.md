@@ -1,9 +1,16 @@
 # Three.js Field Grass
 
-Interactive TSL grass for Three.js.
+Interactive TSL grass for Three.js games: deterministic scatter, painterly wind,
+and responsive body wakes through one WebGPU/WebGL2 material path.
 
-Painterly field grass for Three.js, built for games that need a meadow to move
-as one landscape and still react to bodies passing through it.
+| Flat field | Island terrain |
+| --- | --- |
+| ![A dense interactive grass field with a capsule moving through it](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/flat-field.jpg) | ![The same grass system integrated on deterministic island terrain](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/island-terrain.jpg) |
+
+Both images are captured from the production demo by
+`npm run capture:release-assets`; the committed script is their reproducible recipe.
+
+## Features
 
 The package combines four small systems:
 
@@ -16,21 +23,22 @@ There are no textures, downloaded models, runtime random placement, shader
 forks, or sibling-repository imports. The core API is plain Three.js. A thin
 React Three Fiber adapter is available at `threejs-field-grass/react`.
 
-The hosted demo includes both a flat field and a compact island terrain example.
+The demo includes both a flat field and a compact island terrain example.
 Its controls and terrain code are intentionally separate from both entry points.
 OrbitControls, keyboard handling, and the touch direction pad are examples, not
 runtime dependencies or public package API.
 
-## Status
+## Release status
 
-This is the local `0.1.0` extraction from Sheepdog Sim 3. The `threejs-field-grass`
-package name is a release candidate and remains unpublished. The API is intentionally small, but it
-should be treated as pre-1.0 until another game has integrated it.
+`0.1.0` is the first public-source release candidate. The GitHub repository and
+Pages demo remain behind an owner review gate, and the npm package is intentionally
+unpublished. The API is small but should be treated as pre-1.0 until another game
+has integrated it.
 
 ## Requirements
 
 - Three.js `0.185.x`
-- `WebGPURenderer`, using WebGPU or its WebGL2 fallback
+- `WebGPURenderer`, preferring WebGPU and using Three.js's WebGL2 fallback
 - React 19 and React Three Fiber 9 only when using the optional adapter
 
 TSL APIs are still moving inside Three.js. The peer range is deliberately
@@ -41,7 +49,7 @@ narrow so a package upgrade cannot silently change generated WGSL or GLSL.
 ```bash
 git clone https://github.com/matthew-kissinger/threejs-field-grass.git
 cd threejs-field-grass
-npm install
+npm ci
 npm run bake
 npm run dev
 ```
@@ -52,7 +60,8 @@ heightfield and simple water plane. Move the pale
 capsule with WASD, arrow keys, or the on-screen direction pad. Drag the meadow
 to orbit the camera and use the wheel or pinch gesture to zoom. The capsule's
 wake exposes the spring recovery instead of hiding it in an automated loop.
-Append `?backend=webgl2` to force the WebGL2 fallback for parity checks.
+Append `?backend=webgl2` to force the WebGL2 fallback for parity checks. Browsers
+without a usable WebGPU adapter fall back automatically through `WebGPURenderer`.
 Run `npm run test:webgpu` for a strict installed-Chrome WebGPU receipt. That
 command fails if Three.js silently selects its WebGL2 fallback, even when the
 browser exposes `navigator.gpu`.
