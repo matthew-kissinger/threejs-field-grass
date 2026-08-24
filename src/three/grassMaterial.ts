@@ -17,12 +17,10 @@
  * shares one travelling frame, so a gust crosses 200 m as one event rather than
  * as two hundred metres of independent wobble.
  *
- * BODIES. Four nearby bodies per
- * blade, looked up through the CPU-built grid. The footprint is an oriented
- * rounded rectangle in the body's own frame - never a world-axis ellipse - so a
- * actor turning through the grass turns its pressed patch with it. Age comes back
- * from the same texel and drives a spring response that crosses zero and
- * returns slightly negative, which is the grass standing up and overshooting.
+ * BODIES. The CPU accumulates every live footprint and wake sample into one
+ * linearly filtered deformation field. A blade samples that continuous vector
+ * once, then applies a stable authored angular bias. There are no ranked record
+ * slots to change ownership and no radial direction to flip as an actor passes.
  *
  * COLOUR. One public palette drives root, tip, healthy and trodden tones. The
  * material carries its own compact three-band directional ramp so it can live
@@ -31,18 +29,13 @@
 
 import * as THREE from 'three/webgpu';
 import {
-  abs,
   clamp,
   color,
   cos,
   dot,
-  Fn,
   float,
   fract,
   floor,
-  length,
-  max as tslMax,
-  min as tslMin,
   mix,
   normalize,
   pow,
@@ -50,7 +43,6 @@ import {
   normalWorld,
   sin,
   smoothstep,
-  step,
   texture,
   time,
   uniform,
@@ -60,10 +52,7 @@ import {
   instancedBufferAttribute,
   type TSLNode,
 } from './nodes';
-import {
-  INTERACTION_KIND_OFFSET,
-  type InteractionField,
-} from './interactionField';
+import type { InteractionField } from './interactionField';
 
 const TAU = Math.PI * 2;
 
@@ -109,48 +98,6 @@ const FLUTTER_RATE = 5.2;
 const FLUTTER_AMP = 0.035;
 /** A bent blade is shorter. Keeps the arc roughly isometric under sway. */
 const BEND_DROP = 0.55;
-/** Feathered interaction handoff. Fine motion yields before the slow gust. */
-const PRESS_WIND_MASK_START = 0.018;
-const PRESS_WIND_MASK_END = 0.16;
-const PRESS_FINE_MASK_START = 0.004;
-const PRESS_FINE_MASK_END = 0.075;
-const PRESSED_COARSE_RETENTION = 0.22;
-const PRESSED_DETAIL_RETENTION = 0.06;
-const PRESSED_FLUTTER_RETENTION = 0.015;
-
-// --- bodies -----------------------------------------------------------------
-
-/** Fraction of the sideways push that also presses the blade down. At 0.58 m
- *  of push that is 0.42 m of flatten, which lays a 0.52 m blade over. */
-const FLATTEN = 0.72;
-
-/**
- * The recovery spring, as a pure function of a ghost's age in seconds.
- *
- *   1.0 while the body is there, through zero one third of the way through the
- *   configured trail age, through one small negative overshoot, and exactly 0
- *   when the interaction field expires the record.
- *
- * The negative lobe is the overshoot: the blades that were pushed away lean
- * back past upright before settling. The envelope reaches zero rather than
- * decaying asymptotically because the trail is finite - the oldest ghost has to
- * be able to leave without a step (see interactionField.ts).
- */
-const SPRING_SHAPE = 2.4;
-const DEFAULT_SPRING_SECONDS = 0.92;
-
-/**
- * The same curve in plain numbers, so the trail lengths in interactionField.ts
- * can be held against it by a test instead of by a comment. It is written here,
- * three lines from the node expression it mirrors, because two copies of a
- * formula that sit next to each other cannot drift unseen; two copies in
- * different files can.
- */
-export function springResponse(age: number, duration = DEFAULT_SPRING_SECONDS): number {
-  const envelope = Math.max(0, Math.min(1, 1 - age / duration)) ** SPRING_SHAPE;
-  return envelope * Math.cos((age / duration) * Math.PI * 1.5);
-}
-
 // --- colour -----------------------------------------------------------------
 
 /** Linear multiplier turning the pasture green into the tone at a blade's
@@ -341,67 +288,6 @@ function octave(root: TSLNode, travel: TSLNode, index: number): TSLNode {
   return sineHashField(flow, frequency, angle, time.mul(float(evolve)));
 }
 
-/**
- * What one body does to a blade at `root`. `slot` is the interactor texture's
- * u coordinate, or 0 for an empty slot - which multiplies the whole result away
- * rather than branching, because the four slots of a cell are either all empty
- * (most of the field, most of the time) or a coherent handful, and a masked
- * multiply costs less than a divergent branch either way.
- */
-function bodyPush(
-  root: TSLNode,
-  slot: TSLNode,
-  record: TSLNode,
-  interaction: InteractionField,
-): TSLNode {
-  const raw = record.z;
-  // Kind rides on the heading (interactionField.ts): the angle is bounded by
-  // pi, so anything past half the offset selects the second footprint.
-  const kind = step(float(INTERACTION_KIND_OFFSET / 2), raw);
-  const heading = raw.sub(kind.mul(float(INTERACTION_KIND_OFFSET)));
-  const forward = vec2(cos(heading), sin(heading));
-  const right = vec2(forward.y, forward.x.negate());
-
-  const offset = root.sub(record.xy);
-  // The body's own frame: x across it, y along its facing.
-  const local = vec2(dot(offset, right), dot(offset, forward));
-  const [first, second] = interaction.config.footprints;
-  const halfWid = mix(float(first.halfWidth), float(second.halfWidth), kind);
-  const halfLen = mix(float(first.halfLength), float(second.halfLength), kind);
-  const falloff = mix(float(first.falloff), float(second.falloff), kind);
-
-  // Rounded-rect SDF: negative inside the body, 0 on its edge, metres outside.
-  const q = abs(local).sub(vec2(halfWid, halfLen));
-  const sdf = length(tslMax(q, vec2(0, 0))).add(tslMin(tslMax(q.x, q.y), float(0)));
-  const t = clamp(sdf.div(falloff), float(0), float(1));
-  const press = float(1).sub(t.mul(t).mul(float(3).sub(t.mul(float(2)))));
-
-  const age = record.w;
-  const duration = interaction.config.maxAge;
-  const envelope = pow(
-    clamp(float(1).sub(age.div(float(duration))), float(0), float(1)),
-    float(SPRING_SHAPE),
-  );
-  const isGhost = step(float(0.0001), age);
-  const birth = mix(
-    float(1),
-    smoothstep(float(0), float(Math.min(interaction.config.ghostBirthDuration, duration * 0.25)), age),
-    isGhost,
-  );
-  const response = envelope
-    .mul(cos(age.div(float(duration)).mul(float(Math.PI * 1.5))))
-    .mul(birth);
-
-  const strength = press
-    .mul(response)
-    .mul(step(float(0.0001), slot))
-    .mul(float(interaction.config.strength));
-  // Away from the body centre. The fallback matters only at the exact centre,
-  // where the blade is under the body and its direction is arbitrary anyway.
-  const away = offset.div(tslMax(length(offset), float(0.001)));
-  return vec3(away.x.mul(strength), strength.mul(float(FLATTEN)).negate(), away.y.mul(strength));
-}
-
 export function makeGrassMaterial(inputs: GrassMaterialInputs): THREE.MeshBasicNodeMaterial {
   const palette: GrassPalette = { ...DEFAULT_GRASS_PALETTE, ...inputs.palette };
   const style = inputs.style ?? DEFAULT_GRASS_STYLE;
@@ -455,85 +341,45 @@ export function makeGrassMaterial(inputs: GrassMaterialInputs): THREE.MeshBasicN
 
   // --- bodies ---------------------------------------------------------------
 
-  let coarseRetention: TSLNode = float(1);
-  let detailRetention: TSLNode = float(1);
-  let flutterRetention: TSLNode = float(1);
   let bodyX: TSLNode = float(0);
   let bodyZ: TSLNode = float(0);
   let bodyY: TSLNode = float(0);
 
   if (inputs.interaction) {
-    const interaction = inputs.interaction;
-    const { interactors, cells, config } = interaction;
-    // Keep the four-body visual contract but emit one reusable shader function
-    // instead of inlining the rounded-rectangle footprint graph four times.
-    // This is an exact algebraic refactor: the slots, texture and response are
-    // unchanged, while cold node building and generated source are bounded.
-    const evaluateBodyPush = Fn(
-      ([at, slot, record]: TSLNode[]) => bodyPush(at, slot, record, interaction),
-      { at: 'vec2', slot: 'float', record: 'vec4', return: 'vec3' },
+    const { deformation, config, gridColumns, gridRows } = inputs.interaction;
+    const fieldUV = vec2(
+      root.x.sub(float(config.minX)).div(float(gridColumns * config.cellSize)),
+      root.y.sub(float(config.minZ)).div(float(gridRows * config.cellSize)),
     );
-    const cellUV = vec2(
-      root.x.sub(float(config.minX)).div(float(config.maxX - config.minX)),
-      root.y.sub(float(config.minZ)).div(float(config.maxZ - config.minZ)),
-    );
-    const slots: TSLNode = texture(cells, cellUV, 0);
-    // Sample the records in the caller. Capturing a texture inside a reusable
-    // Fn can omit its uniform dependency from generated WGSL, leaving the
-    // textureDimensions call with an unresolved nodeUniform.
-    const recordX: TSLNode = texture(interactors, vec2(slots.x, float(0.5)), 0);
-    const recordY: TSLNode = texture(interactors, vec2(slots.y, float(0.5)), 0);
-    const recordZ: TSLNode = texture(interactors, vec2(slots.z, float(0.5)), 0);
-    const recordW: TSLNode = texture(interactors, vec2(slots.w, float(0.5)), 0);
-    const push = evaluateBodyPush(root, slots.x, recordX)
-      .add(evaluateBodyPush(root, slots.y, recordY))
-      .add(evaluateBodyPush(root, slots.z, recordZ))
-      .add(evaluateBodyPush(root, slots.w, recordW));
-    // Overlapping ghosts along a trail would otherwise stack into a shove no
-    // single body ever applies; the cap is what keeps a wake flat rather than
-    // explosive, and it is the carried strength, not a new number.
-    const horizontal = vec2(push.x, push.z);
-    const magnitude = length(horizontal);
-    const capped = horizontal.mul(
-      tslMin(magnitude, float(config.strength)).div(tslMax(magnitude, float(0.0001))),
-    );
-    const flattened = clamp(
-      push.y,
-      float(-config.strength * FLATTEN),
-      float(config.strength * FLATTEN * 0.5),
-    );
-    const horizontalPress = clamp(magnitude.div(float(config.strength)), float(0), float(1));
-    const verticalPress = clamp(
-      abs(flattened).div(float(config.strength * FLATTEN)),
-      float(0),
-      float(1),
-    );
-    const localPress = tslMax(horizontalPress, verticalPress);
-    const windMask = smoothstep(
-      float(PRESS_WIND_MASK_START),
-      float(PRESS_WIND_MASK_END),
-      localPress,
-    );
-    const fineMask = smoothstep(
-      float(PRESS_FINE_MASK_START),
-      float(PRESS_FINE_MASK_END),
-      localPress,
-    );
-    coarseRetention = mix(float(1), float(PRESSED_COARSE_RETENTION), windMask);
-    detailRetention = mix(float(1), float(PRESSED_DETAIL_RETENTION), fineMask);
-    flutterRetention = mix(float(1), float(PRESSED_FLUTTER_RETENTION), fineMask);
-    bodyX = capped.x;
-    bodyZ = capped.y;
-    bodyY = flattened;
+    const packed: TSLNode = texture(deformation, fieldUV, 0);
+    const fieldX = packed.x.mul(float(255)).sub(float(128)).div(float(127))
+      .mul(float(config.strength));
+    const fieldZ = packed.y.mul(float(255)).sub(float(128)).div(float(127))
+      .mul(float(config.strength));
+
+    // Each blade keeps the same angular bias for its whole life. Most follow
+    // the travel direction, many fold toward either side, and the extremes can
+    // lie slightly back. Because this is a rotation of one continuous field,
+    // none can change sides when the actor crosses its root.
+    const bladeBias = phase.sub(float(0.5)).mul(float(config.bladeDirectionSpread * 2));
+    const tuftBias = fract(seed.mul(float(31.7))).sub(float(0.5)).mul(float(0.5));
+    const bendAngle = bladeBias.add(tuftBias);
+    const bendCos = cos(bendAngle);
+    const bendSin = sin(bendAngle);
+    bodyX = fieldX.mul(bendCos).sub(fieldZ.mul(bendSin));
+    bodyZ = fieldX.mul(bendSin).add(fieldZ.mul(bendCos));
+    bodyY = packed.z.mul(float(255)).sub(float(128)).div(float(127))
+      .mul(float(config.strength * config.flattenRatio));
   }
 
-  // Pressure-aware wind is applied before final displacement. A flattened
-  // blade retains a little slow field motion but loses almost all fine tip
-  // flutter, preventing a pressed strip from looking stretched or electrified.
-  const coarseOffset = coarseDirection.mul(coarseSway.mul(coarseRetention));
-  const fineSway = detailSway.mul(detailRetention).add(flutterSway.mul(flutterRetention));
+  // Wind remains one continuous pose while interaction is a separate additive
+  // offset. Suppressing and later restoring live wind advanced a hidden phase
+  // behind flattened blades, so the handoff could read as a snap even when the
+  // recovery curve itself reached zero continuously.
+  const coarseOffset = coarseDirection.mul(coarseSway);
+  const fineSway = detailSway.add(flutterSway);
   const windOffset = coarseOffset.add(direction.mul(fineSway));
-  const sway = coarseSway.mul(coarseRetention).add(fineSway);
+  const sway = coarseSway.add(fineSway);
   const displaceX = windOffset.x.add(bodyX.mul(reach));
   const displaceZ = windOffset.y.add(bodyZ.mul(reach));
   const displaceY = sway

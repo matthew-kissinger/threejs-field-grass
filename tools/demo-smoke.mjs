@@ -69,10 +69,7 @@ async function verify(browser, url, viewport, scene, mobile = false) {
       if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     });
     await page.keyboard.down('w');
-    await page.waitForTimeout(300);
-    await page.keyboard.up('w');
   }
-  await page.getByRole('button', { name: 'Orbit' }).click();
   const canvas = page.locator('canvas');
   const bounds = await canvas.boundingBox();
   if (!bounds) throw new Error('Canvas has no bounds for orbit test');
@@ -80,11 +77,24 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width * 0.62, bounds.y + bounds.height * 0.46, { steps: 6 });
   await page.mouse.up();
+  if (!mobile) {
+    await page.waitForTimeout(300);
+    await page.keyboard.up('w');
+  }
   await page.getByRole('button', { name: 'Zoom in' }).click();
   await page.getByRole('button', { name: 'Reset view' }).click();
+  if (!mobile && scene === 'field') {
+    await page.getByRole('button', { name: 'Enter fullscreen' }).click();
+    await page.waitForFunction(() => document.fullscreenElement?.classList.contains('viewport'));
+    await page.getByRole('button', { name: 'Exit fullscreen' }).click();
+    await page.waitForFunction(() => document.fullscreenElement === null);
+  }
   await page.getByRole('button', { name: 'Storygrass' }).click();
   await page.locator('.backend-badge').waitFor();
+  await page.locator('.fps-badge').waitFor();
   await page.waitForTimeout(550);
+  const fpsText = await page.locator('.fps-badge').textContent();
+  if (!fpsText || !/^\d+ FPS$/.test(fpsText)) throw new Error(`Invalid FPS badge: ${fpsText}`);
   const receipt = await page.evaluate(() => window.__FIELD_GRASS_QA__);
   if (!receipt || receipt.scene !== scene || receipt.draws <= 0 || receipt.triangles <= 0) {
     throw new Error(`Invalid renderer receipt: ${JSON.stringify(receipt)}`);

@@ -107,7 +107,6 @@ interface MoveIntent {
   z: number;
 }
 
-type ControlMode = 'drive' | 'orbit';
 type LookName = 'field' | 'storybook';
 type SceneName = 'field' | 'island';
 
@@ -142,11 +141,9 @@ interface CameraActions {
 }
 
 function OrbitCamera({
-  mode,
   actions,
   scene,
 }: {
-  readonly mode: ControlMode;
   readonly actions: MutableRefObject<CameraActions | null>;
   readonly scene: SceneName;
 }) {
@@ -192,9 +189,9 @@ function OrbitCamera({
     };
   }, [actions, camera, controls, scene, size.height, size.width]);
   useEffect(() => {
-    controls.enableRotate = mode === 'orbit';
+    controls.enableRotate = true;
     controls.enableZoom = true;
-  }, [controls, mode]);
+  }, [controls]);
   useFrame(() => controls.update(), -1);
   return null;
 }
@@ -249,7 +246,6 @@ function CapsuleController({
       x: position.current.x,
       z: position.current.z,
       heading: heading.current,
-      priority: -100,
     }]);
   });
   return (
@@ -310,14 +306,27 @@ function BackendBadge() {
   return <p className="backend-badge" aria-live="polite">{backend}</p>;
 }
 
+function PerformanceBadge() {
+  const [fps, setFps] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => {
+      const frameTime = window.__FIELD_GRASS_QA__?.frameP50Ms ?? 0;
+      setFps(frameTime > 0 ? Math.round(1000 / frameTime) : null);
+    };
+    update();
+    const interval = window.setInterval(update, 500);
+    return () => window.clearInterval(interval);
+  }, []);
+  const label = fps === null ? 'Performance sampling' : `Performance ${fps} frames per second`;
+  return <output className="fps-badge" aria-label={label}>{fps === null ? '— FPS' : `${fps} FPS`}</output>;
+}
+
 function Meadow({
   intent,
-  mode,
   cameraActions,
   look,
 }: {
   readonly intent: MutableRefObject<MoveIntent>;
-  readonly mode: ControlMode;
   readonly cameraActions: MutableRefObject<CameraActions | null>;
   readonly look: DemoLook;
 }) {
@@ -348,19 +357,17 @@ function Meadow({
       </mesh>
       <GrassLayer buffers={buffers} interaction={interaction} preset={look.preset} />
       <CapsuleController field={interaction} intent={intent} />
-      <OrbitCamera mode={mode} actions={cameraActions} scene="field" />
+      <OrbitCamera actions={cameraActions} scene="field" />
     </>
   );
 }
 
 function IslandMeadow({
   intent,
-  mode,
   cameraActions,
   look,
 }: {
   readonly intent: MutableRefObject<MoveIntent>;
-  readonly mode: ControlMode;
   readonly cameraActions: MutableRefObject<CameraActions | null>;
   readonly look: DemoLook;
 }) {
@@ -390,7 +397,7 @@ function IslandMeadow({
       <IslandTerrainView field={terrain} />
       <GrassLayer buffers={islandBuffers} interaction={interaction} preset={look.preset} />
       <CapsuleController field={interaction} intent={intent} terrain={terrain} />
-      <OrbitCamera mode={mode} actions={cameraActions} scene="island" />
+      <OrbitCamera actions={cameraActions} scene="island" />
     </>
   );
 }
@@ -453,10 +460,12 @@ function DirectionPad({ intent }: { readonly intent: MutableRefObject<MoveIntent
 function Demo() {
   const intent = useRef<MoveIntent>({ x: 0, z: 0 });
   const cameraActions = useRef<CameraActions | null>(null);
-  const [mode, setMode] = useState<ControlMode>('drive');
+  const viewport = useRef<HTMLElement>(null);
   const [lookName, setLookName] = useState<LookName>('field');
   const [sceneName, setSceneName] = useState<SceneName>('field');
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenSupported, setFullscreenSupported] = useState(false);
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
     const update = () => setReducedMotion(query.matches);
@@ -483,6 +492,13 @@ function Demo() {
     if (window.__FIELD_GRASS_QA__) window.__FIELD_GRASS_QA__.scene = sceneName;
   }, [sceneName]);
   useEffect(() => {
+    const update = () => setIsFullscreen(document.fullscreenElement === viewport.current);
+    document.addEventListener('fullscreenchange', update);
+    setFullscreenSupported(typeof viewport.current?.requestFullscreen === 'function');
+    update();
+    return () => document.removeEventListener('fullscreenchange', update);
+  }, []);
+  useEffect(() => {
     const held = new Set<string>();
     const publish = () => {
       intent.current.x = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0)
@@ -491,7 +507,7 @@ function Demo() {
         - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
     };
     const down = (event: KeyboardEvent) => {
-      if (mode !== 'drive' || !/^(Key[WASD]|Arrow(Up|Down|Left|Right))$/.test(event.code)) return;
+      if (!/^(Key[WASD]|Arrow(Up|Down|Left|Right))$/.test(event.code)) return;
       if (event.target instanceof HTMLElement && event.target.closest('button, a, input, textarea, select')) return;
       event.preventDefault();
       held.add(event.code);
@@ -514,7 +530,18 @@ function Demo() {
       window.removeEventListener('keyup', up);
       window.removeEventListener('blur', clear);
     };
-  }, [mode]);
+  }, []);
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement === viewport.current) {
+        await document.exitFullscreen();
+        return;
+      }
+      await viewport.current?.requestFullscreen();
+    } catch {
+      setIsFullscreen(false);
+    }
+  };
   return (
     <main>
       <nav className="site-nav" aria-label="Primary navigation">
@@ -550,7 +577,7 @@ function Demo() {
           <span>WebGPU + WebGL2</span>
         </div>
       </header>
-      <section className="viewport" id="demo" aria-label="Interactive grass demo">
+      <section ref={viewport} className="viewport" id="demo" aria-label="Interactive grass demo">
         <Canvas
           gl={createRenderer as never}
           dpr={[1, 1.6]}
@@ -560,9 +587,9 @@ function Demo() {
         >
           <RendererReceipt />
           {sceneName === 'field' ? (
-            <Meadow intent={intent} mode={mode} cameraActions={cameraActions} look={look} />
+            <Meadow intent={intent} cameraActions={cameraActions} look={look} />
           ) : (
-            <IslandMeadow intent={intent} mode={mode} cameraActions={cameraActions} look={look} />
+            <IslandMeadow intent={intent} cameraActions={cameraActions} look={look} />
           )}
         </Canvas>
         <div className="demo-toolbar" aria-label="Demo controls">
@@ -578,22 +605,17 @@ function Demo() {
               onClick={() => setSceneName('island')}
             >Island Terrain</button>
           </div>
-          <div className="mode-switch" role="group" aria-label="Control mode">
-            <button
-              type="button"
-              aria-pressed={mode === 'drive'}
-              onClick={() => setMode('drive')}
-            >Move</button>
-            <button
-              type="button"
-              aria-pressed={mode === 'orbit'}
-              onClick={() => setMode('orbit')}
-            >Orbit</button>
-          </div>
           <div className="view-buttons" role="group" aria-label="View controls">
             <button type="button" aria-label="Zoom out" onClick={() => cameraActions.current?.zoom(1.2)}>−</button>
             <button type="button" aria-label="Zoom in" onClick={() => cameraActions.current?.zoom(0.82)}>+</button>
             <button type="button" aria-label="Reset view" onClick={() => cameraActions.current?.reset()}>Reset</button>
+            <button
+              type="button"
+              aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              aria-pressed={isFullscreen}
+              disabled={!fullscreenSupported}
+              onClick={() => void toggleFullscreen()}
+            >{isFullscreen ? 'Exit' : 'Full'}</button>
           </div>
           <div className="look-switch" role="group" aria-label="Grass look">
             {(Object.keys(LOOKS) as LookName[]).map((name) => (
@@ -606,22 +628,15 @@ function Demo() {
             ))}
           </div>
         </div>
-        {mode === 'drive' ? <DirectionPad intent={intent} /> : null}
+        <DirectionPad intent={intent} />
         <div className="demo-help">
-          {mode === 'drive' ? (
-            <p>
-              <strong>{sceneName === 'island' ? 'Island' : 'Drive'}</strong>{' '}
-              <span className="help-long">WASD, arrows, or direction pad. Wheel or pinch to zoom.</span>
-              <span className="help-short">Pad moves. Pinch zooms.</span>
-            </p>
-          ) : (
-            <p>
-              <strong>Orbit</strong>{' '}
-              <span className="help-long">drag the field. Wheel, pinch, or use −/+ to zoom.</span>
-              <span className="help-short">Drag to orbit. Pinch zooms.</span>
-            </p>
-          )}
+          <p>
+            <strong>{sceneName === 'island' ? 'Island' : 'Move + orbit'}</strong>{' '}
+            <span className="help-long">WASD or arrows move while you drag. Wheel or pinch to zoom.</span>
+            <span className="help-short">Pad moves. Drag orbits; pinch zooms.</span>
+          </p>
         </div>
+        <PerformanceBadge />
         <BackendBadge />
       </section>
       <section className="example-guide" aria-label="Included examples">
@@ -651,8 +666,8 @@ cd threejs-field-grass && npm ci && npm run build`}</code></pre>
         </article>
         <div className="stat-grid" aria-label="Package facts">
           <article><strong>12 bytes</strong><span>per baked tuft</span></article>
-          <article><strong>4 slots</strong><span>per interaction cell</span></article>
-          <article><strong>0 textures</strong><span>required for the look</span></article>
+          <article><strong>1 field</strong><span>for continuous deformation</span></article>
+          <article><strong>0 images</strong><span>required for the look</span></article>
           <article><strong>2 entries</strong><span>core and /react</span></article>
         </div>
         <article className="code-card" id="api">

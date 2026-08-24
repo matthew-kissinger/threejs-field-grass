@@ -8,3 +8,6 @@
 - Added flat-field and deterministic island-terrain examples with desktop and touch controls.
 - Added the Field and Storygrass data presets on one WebGPU/WebGL2 TSL path.
 - Added package-consumer, browser, native-WebGPU, capture, CI, and Pages release receipts.
+- Replaced ranked per-cell interactor selection with a continuous directional
+  deformation field and stable per-blade fold variation.
+- Added simultaneous movement/orbit controls, fullscreen, and a subtle FPS badge.

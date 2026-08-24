@@ -2,13 +2,13 @@
 
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { wakeRecoveryResponse } from '../src/core/recovery';
 import {
   FIELD_GRASS_PRESET,
   STORYBOOK_GRASS_PRESET,
 } from '../src/three/grassLayer';
 import {
   DEFAULT_GRASS_STYLE,
-  springResponse,
   STORYBOOK_GRASS_STYLE,
 } from '../src/three/grassMaterial';
 import {
@@ -54,21 +54,26 @@ describe('material boundary', () => {
     expect(source).toContain('const coarse = octave(root, travel, 0)');
     expect(source).toContain('const middle = octave(root, travel, 1)');
     expect(source).toContain('const fine = octave(root, travel, 2)');
-    expect(source).toContain('const PRESS_WIND_MASK_START = 0.018');
-    expect(source).toContain('const PRESS_WIND_MASK_END = 0.16');
-    expect(source).toContain('const PRESS_FINE_MASK_START = 0.004');
-    expect(source).toContain('const PRESS_FINE_MASK_END = 0.075');
-    expect(source).toContain('const PRESSED_COARSE_RETENTION = 0.22');
-    expect(source).toContain('const PRESSED_DETAIL_RETENTION = 0.06');
-    expect(source).toContain('const PRESSED_FLUTTER_RETENTION = 0.015');
-    expect(source).toContain('const localPress = tslMax(horizontalPress, verticalPress)');
-    expect(source).toContain('const windMask = smoothstep(');
-    expect(source).toContain('const fineMask = smoothstep(');
-    expect(source).toContain('const birth = mix(');
-    expect(source).toContain('interaction.config.ghostBirthDuration');
-    expect(source).toContain('const coarseOffset = coarseDirection.mul(coarseSway.mul(coarseRetention))');
-    expect(source).toContain('detailSway.mul(detailRetention).add(flutterSway.mul(flutterRetention))');
-    expect(source.indexOf('const localPress')).toBeLessThan(source.indexOf('const displaceX'));
+    expect(source).not.toContain('PRESS_WIND_MASK');
+    expect(source).not.toContain('PRESS_FINE_MASK');
+    expect(source).not.toContain('PRESSED_COARSE_RETENTION');
+    expect(source).not.toContain('PRESSED_DETAIL_RETENTION');
+    expect(source).not.toContain('PRESSED_FLUTTER_RETENTION');
+    expect(source).not.toContain('coarseRetention');
+    expect(source).not.toContain('detailRetention');
+    expect(source).not.toContain('flutterRetention');
+    expect(source).toContain('texture(deformation, fieldUV, 0)');
+    expect(source).toContain("packed.x.mul(float(255)).sub(float(128)).div(float(127))");
+    expect(source).toContain('const bladeBias = phase.sub(float(0.5))');
+    expect(source).toContain('const tuftBias = fract(seed.mul(float(31.7)))');
+    expect(source).not.toContain('recordX');
+    expect(source).not.toContain('recordY');
+    expect(source).not.toContain('recordZ');
+    expect(source).not.toContain('recordW');
+    expect(source).not.toContain('evaluateBodyPush');
+    expect(source).not.toContain('const slots');
+    expect(source).toContain('const coarseOffset = coarseDirection.mul(coarseSway)');
+    expect(source).toContain('const fineSway = detailSway.add(flutterSway)');
     expect(source).not.toContain('const SHEEN_MIN = 0.88');
     expect(source).not.toContain('const SHEEN_MAX = 1.14');
     expect(source).not.toMatch(/\.mul\(sheen\)/);
@@ -82,9 +87,15 @@ describe('material boundary', () => {
     expect(source).toContain('inputs.style ?? DEFAULT_GRASS_STYLE');
   });
 
-  it('settles the wake continuously to zero at its configured expiry', () => {
-    expect(Math.abs(springResponse(0.899, 0.9))).toBeLessThan(0.00001);
-    expect(Math.abs(springResponse(0.9, 0.9))).toBe(0);
-    expect(Math.abs(springResponse(1.2, 0.9))).toBe(0);
+  it('settles the wake monotonically with no end-of-life snap', () => {
+    const samples = Array.from({ length: 101 }, (_, index) => wakeRecoveryResponse(index * 0.009, 0.9));
+    expect(samples[0]).toBe(1);
+    expect(samples.at(-1)).toBe(0);
+    expect(samples.every((sample) => sample >= 0 && sample <= 1)).toBe(true);
+    for (let index = 1; index < samples.length; index++) {
+      expect(samples[index]).toBeLessThanOrEqual(samples[index - 1]!);
+    }
+    expect(wakeRecoveryResponse(0.899, 0.9)).toBeLessThan(0.0000001);
+    expect(wakeRecoveryResponse(1.2, 0.9)).toBe(0);
   });
 });

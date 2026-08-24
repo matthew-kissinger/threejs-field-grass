@@ -63,7 +63,7 @@ h1 { margin: 0; max-width: 810px; font-size: clamp(48px, 8vw, 94px); font-weight
 }
 .viewport canvas { display: block; width: 100%; height: 100%; }
 .demo-toolbar { position: absolute; top: 14px; left: 14px; display: flex; flex-wrap: wrap; gap: 8px; z-index: 2; }
-.scene-switch, .mode-switch, .view-buttons, .look-switch {
+.scene-switch, .view-buttons, .look-switch {
   display: flex;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -85,7 +85,10 @@ h1 { margin: 0; max-width: 810px; font-size: clamp(48px, 8vw, 94px); font-weight
 .demo-toolbar button:last-child { border-right: 0; }
 .demo-toolbar button[aria-pressed="true"] { color: #18332a; background: #d9ca8b; }
 .demo-toolbar button:hover { background: rgba(217, 202, 139, 0.24); }
+.demo-toolbar button:disabled { cursor: not-allowed; opacity: 0.5; }
 .view-buttons button[aria-label^="Zoom"] { min-width: 39px; padding: 0; font-size: 18px; }
+.view-buttons button[aria-label$="fullscreen"] { min-width: 45px; }
+.viewport:fullscreen { width: 100%; height: 100%; min-height: 0; border: 0; border-radius: 0; }
 .demo-help {
   position: absolute;
   left: 50%;
@@ -112,6 +115,7 @@ h1 { margin: 0; max-width: 810px; font-size: clamp(48px, 8vw, 94px); font-weight
 .pad-left { grid-column: 1; grid-row: 2; }
 .pad-right { grid-column: 3; grid-row: 2; }
 .pad-down { grid-column: 2; grid-row: 3; }
+.fps-badge { position: absolute; top: 14px; right: 14px; z-index: 2; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 999px; padding: 7px 9px; color: #f7f4e9; background: rgba(20, 46, 37, 0.68); backdrop-filter: blur(8px); font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.05em; pointer-events: none; }
 .backend-badge { position: absolute; right: 14px; bottom: 14px; margin: 0; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 999px; padding: 7px 9px; color: #f7f4e9; background: rgba(20, 46, 37, 0.76); font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.05em; }
 .canvas-fallback { padding: 24px; color: #173329; background: #f3f1e9; }
 
@@ -159,8 +163,7 @@ footer a { color: #365f4c; font-weight: 700; text-underline-offset: 3px; }
   .demo-toolbar button { min-height: 34px; padding: 0 8px; }
   .scene-switch { grid-column: 1; grid-row: 1; }
   .look-switch { grid-column: 2; grid-row: 1; }
-  .mode-switch { grid-column: 1; grid-row: 2; }
-  .view-buttons { grid-column: 2; grid-row: 2; }
+  .view-buttons { grid-column: 1 / span 2; grid-row: 2; }
   .site-nav { margin-bottom: 48px; }
   .site-nav > div a:not(:last-child) { display: none; }
   .demo-help {
@@ -175,6 +178,7 @@ footer a { color: #365f4c; font-weight: 700; text-underline-offset: 3px; }
   .help-long { display: none; }
   .help-short { display: inline; }
   .direction-pad { display: grid; left: 10px; bottom: 10px; }
+  .fps-badge { top: 10px; right: 10px; }
   .backend-badge { right: 10px; bottom: 10px; }
   .docs { margin-top: 52px; }
   .example-guide { grid-template-columns: 1fr; margin-top: 10px; }

@@ -17,9 +17,9 @@ The package combines four small systems:
 - deterministic baked scatter with prefix-safe quality tiers
 - authored multi-blade tuft geometry with one instanced draw per layer
 - a TSL-only material with three-octave wind and golden-hour colour
-- a bounded CPU interaction grid that gives moving bodies a settling wake
+- a bounded directional deformation field that gives moving bodies a settling wake
 
-There are no textures, downloaded models, runtime random placement, shader
+There are no image assets, downloaded models, runtime random placement, shader
 forks, or sibling-repository imports. The core API is plain Three.js. A thin
 React Three Fiber adapter is available at `threejs-field-grass/react`.
 
@@ -30,10 +30,10 @@ runtime dependencies or public package API.
 
 ## Release status
 
-`0.1.0` is the first public-source release candidate. The GitHub repository and
-Pages demo remain behind an owner review gate, and the npm package is intentionally
-unpublished. The API is small but should be treated as pre-1.0 until another game
-has integrated it.
+`0.1.0` is a public-source preview. The GitHub repository and Pages demo are
+public, while the npm package is intentionally unpublished. The API is small but
+should be treated as pre-1.0 until another game has integrated it and real-world
+usage has put pressure on the surface.
 
 ## Requirements
 
@@ -59,7 +59,7 @@ The default demo contains 18,000 tufts and 126,000 blades in one draw. Switch to
 heightfield and simple water plane. Move the pale
 capsule with WASD, arrow keys, or the on-screen direction pad. Drag the meadow
 to orbit the camera and use the wheel or pinch gesture to zoom. The capsule's
-wake exposes the spring recovery instead of hiding it in an automated loop.
+wake exposes the monotonic C2 recovery instead of hiding it in an automated loop.
 Append `?backend=webgl2` to force the WebGL2 fallback for parity checks. Browsers
 without a usable WebGPU adapter fall back automatically through `WebGPURenderer`.
 Run `npm run test:webgpu` for a strict installed-Chrome WebGPU receipt. That
@@ -170,7 +170,17 @@ are included here.
 - No per-blade simulation state. Wake memory is a fixed body trail on the CPU.
 - Wake records are spaced by `minGhostDistance` in world units, then eased in
   over `ghostBirthDuration`; sample placement is independent of frame rate.
-- Four nearest interactors per grid cell. Dense overlap is intentionally capped.
+- Wake recovery uses one monotonic quintic curve while the CPU accumulates the
+  trail into a compact RGBA8 directional field. It has
+  no sign reversal and reaches exact zero with zero end velocity before the CPU
+  retires the finite trail record, so consumers do not need a game-side cleanup.
+- Wind remains continuous through contact; the settling wake is additive and
+  never hands a blade between separate hidden and visible wind states.
+- Every active footprint and wake sample contributes before the field is capped
+  and bilinearly filtered. There is no ranked-record promotion late in recovery.
+- Footprints bend along each interactor's stable heading with a restrained
+  footprint fan, then each blade applies a stable angular bias. The result mixes
+  forward, side, and occasional backward folds without flipping during a pass.
 - No allocations in `InteractionField.update` after construction.
 - Quality tiers decode a prefix of the same shuffled baked group.
 - The library does not own terrain, player state, renderer setup, or post effects.
@@ -185,6 +195,11 @@ interaction field entirely.
 Measure active gameplay on target hardware. The useful diagnostics are draw
 calls, triangles, geometries, textures, frame time, device pixel ratio, and the
 largest body count that can occupy the interactive field.
+
+`cellSize` controls the deformation-field tradeoff. Smaller cells preserve
+sharper footprints; larger cells reduce CPU accumulation work and texture upload
+size. The default 0.5 m grid is deliberately coarser than individual blades so
+linear filtering supplies spatial continuity without per-blade simulation state.
 
 ## Origin and vendoring
 

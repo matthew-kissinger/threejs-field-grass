@@ -7,8 +7,28 @@ function textureData(texture: { image: { data: unknown } }): Float32Array {
   return texture.image.data as Float32Array;
 }
 
+function deformationData(texture: { image: { data: unknown } }): Uint8Array {
+  return texture.image.data as Uint8Array;
+}
+
+function cellBase(
+  field: ReturnType<typeof createInteractionField>,
+  x: number,
+  z: number,
+): number {
+  const column = Math.max(0, Math.min(
+    field.gridColumns - 1,
+    Math.floor((x - field.config.minX) / field.config.cellSize),
+  ));
+  const row = Math.max(0, Math.min(
+    field.gridRows - 1,
+    Math.floor((z - field.config.minZ) / field.config.cellSize),
+  ));
+  return (row * field.gridColumns + column) * 4;
+}
+
 describe('interaction field', () => {
-  it('files live bodies into the four-slot cell grid and retains a bounded wake', () => {
+  it('accumulates live bodies and a bounded wake into one deformation field', () => {
     const field = createInteractionField({
       minX: -10,
       maxX: 10,
@@ -21,25 +41,39 @@ describe('interaction field', () => {
     field.update(0.11, [{ slot: 0, x: -2, z: 0, heading: 0 }]);
     field.update(0.11, [{ slot: 0, x: 2, z: 0, heading: 0 }]);
     const records = textureData(field.interactors);
-    const cells = textureData(field.cells);
+    const deformation = deformationData(field.deformation);
     expect(records[0]).toBe(2);
     expect([...records].some((value, index) => index % 4 === 0 && value === -2)).toBe(true);
-    expect([...cells].some((value) => value > 0)).toBe(true);
+    expect([...deformation].some((value, index) => index % 4 === 3 && value > 0)).toBe(true);
     expect(records.length).toBe(2 * 4 * 4);
     field.dispose();
   });
 
   it('clears the grid and trails on reset', () => {
-    const field = createInteractionField({ maxBodies: 1, ghostsPerBody: 1 });
+    const field = createInteractionField({
+      minX: -4,
+      maxX: 4,
+      minZ: -4,
+      maxZ: 4,
+      maxBodies: 1,
+      ghostsPerBody: 1,
+    });
     field.update(0.2, [{ slot: 0, x: 1, z: 1, heading: 0 }]);
     field.reset();
     expect([...textureData(field.interactors)].every((value) => value === 0)).toBe(true);
-    expect([...textureData(field.cells)].every((value) => value === 0)).toBe(true);
+    const deformation = deformationData(field.deformation);
+    for (let base = 0; base < deformation.length; base += 4) {
+      expect([...deformation.slice(base, base + 4)]).toEqual([128, 128, 128, 0]);
+    }
     field.dispose();
   });
 
   it('never accumulates ghosts under a stationary body', () => {
     const field = createInteractionField({
+      minX: -4,
+      maxX: 4,
+      minZ: -4,
+      maxZ: 4,
       maxBodies: 1,
       ghostsPerBody: 6,
       ghostBirthDuration: 0.1,
@@ -47,12 +81,12 @@ describe('interaction field', () => {
       maxAge: 0.4,
     });
     field.update(0.11, [{ slot: 0, x: 2, z: -1, heading: 0.4 }]);
-    const initialCells = textureData(field.cells).slice();
+    const initialDeformation = deformationData(field.deformation).slice();
     expect(field.activeInteractorCount).toBe(1);
     for (let sample = 0; sample < 20; sample++) {
       field.update(0.11, [{ slot: 0, x: 2, z: -1, heading: 0.4 }]);
       expect(field.activeInteractorCount).toBe(1);
-      expect(textureData(field.cells)).toEqual(initialCells);
+      expect(deformationData(field.deformation)).toEqual(initialDeformation);
     }
     field.dispose();
   });
@@ -71,15 +105,65 @@ describe('interaction field', () => {
     field.update(0.11, [{ slot: 0, x: -3, z: 0, heading: 0 }]);
     field.update(0.11, [{ slot: 0, x: 3, z: 0, heading: 0 }]);
     field.update(0.31, [{ slot: 0, x: 3, z: 0, heading: 0 }]);
-    const records = textureData(field.interactors);
-    const activeXs = new Set<number>();
-    for (const coordinate of textureData(field.cells)) {
-      if (coordinate <= 0) continue;
-      const index = Math.floor(coordinate * (records.length / 4));
-      activeXs.add(records[index * 4]!);
+    const oldBase = cellBase(field, -3, 0);
+    const liveBase = cellBase(field, 3, 0);
+    const deformation = deformationData(field.deformation);
+    expect(deformation[oldBase + 3]).toBe(0);
+    expect(deformation[liveBase + 3]).toBeGreaterThan(0);
+    field.dispose();
+  });
+
+  it('keeps longitudinal push direction stable as a body crosses a blade', () => {
+    const field = createInteractionField({
+      minX: -2,
+      maxX: 2,
+      minZ: -2,
+      maxZ: 2,
+      cellSize: 0.5,
+      maxBodies: 1,
+      ghostsPerBody: 0,
+    });
+    const target = cellBase(field, 0.25, 0.25);
+    field.update(1 / 60, [{ slot: 0, x: -0.5, z: 0, heading: 0 }]);
+    const beforeCrossing = deformationData(field.deformation)[target]!;
+    field.update(1 / 60, [{ slot: 0, x: 0.5, z: 0, heading: 0 }]);
+    const afterCrossing = deformationData(field.deformation)[target]!;
+    expect(beforeCrossing).toBeGreaterThan(128);
+    expect(afterCrossing).toBeGreaterThan(128);
+    field.dispose();
+  });
+
+  it('never reactivates a settled cell after recovery begins', () => {
+    const field = createInteractionField({
+      minX: -5,
+      maxX: 5,
+      minZ: -3,
+      maxZ: 3,
+      cellSize: 0.25,
+      maxBodies: 1,
+      ghostsPerBody: 32,
+      minGhostDistance: 0.2,
+      ghostBirthDuration: 0.08,
+      maxAge: 1,
+    });
+    field.update(0, [{ slot: 0, x: -2, z: 0, heading: 0 }]);
+    for (let frame = 1; frame <= 60; frame++) {
+      field.update(1 / 60, [{ slot: 0, x: -2 + frame / 15, z: 0, heading: 0 }]);
     }
-    expect(activeXs.has(-3)).toBe(false);
-    expect(activeXs.has(3)).toBe(true);
+
+    const target = cellBase(field, 0, 0);
+    const recovery: number[] = [];
+    for (let frame = 0; frame < 75; frame++) {
+      field.update(1 / 60, [{ slot: 0, x: 2, z: 0, heading: 0 }]);
+      recovery.push(deformationData(field.deformation)[target + 3]!);
+    }
+    expect(recovery[0]).toBeGreaterThan(0);
+    for (let index = 1; index < recovery.length; index++) {
+      expect(recovery[index]).toBeLessThanOrEqual(recovery[index - 1]!);
+    }
+    const settledAt = recovery.indexOf(0);
+    expect(settledAt).toBeGreaterThan(0);
+    expect(recovery.slice(settledAt).every((value) => value === 0)).toBe(true);
     field.dispose();
   });
 

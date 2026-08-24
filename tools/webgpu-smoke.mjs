@@ -2,6 +2,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -9,11 +10,24 @@ import { chromium } from 'playwright';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const vite = resolve(repo, 'node_modules', 'vite', 'bin', 'vite.js');
 const output = resolve(repo, 'output', 'playwright', 'webgpu');
-const port = 5197;
 const headed = process.argv.includes('--headed');
+
+async function reservePort() {
+  const probe = createServer();
+  await new Promise((resolveListen, reject) => {
+    probe.once('error', reject);
+    probe.listen(0, '127.0.0.1', resolveListen);
+  });
+  const address = probe.address();
+  if (!address || typeof address === 'string') throw new Error('Could not reserve a WebGPU preview port');
+  await new Promise((resolveClose) => probe.close(resolveClose));
+  return address.port;
+}
+
+const port = await reservePort();
 const server = spawn(
   process.execPath,
-  [vite, 'preview', '--config', 'vite.demo.config.ts', '--host', '127.0.0.1', '--port', String(port)],
+  [vite, 'preview', '--config', 'vite.demo.config.ts', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
   { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] },
 );
 
