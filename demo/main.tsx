@@ -26,6 +26,13 @@ import {
   type GrassPreset,
 } from '../src/index';
 import { GrassLayer } from '../src/react';
+import { IslandTerrainView } from './examples/island/IslandTerrainView';
+import { createIslandGrassBuffers } from './examples/island/scatter';
+import {
+  createIslandHeightfield,
+  isIslandWalkable,
+  type IslandHeightfield,
+} from './examples/island/terrain';
 import './styles.css';
 
 const manifest = manifestJson as GrassManifest;
@@ -33,6 +40,26 @@ const response = await fetch(tuftUrl);
 if (!response.ok) throw new Error(`Grass demo scatter failed to load: ${response.status}`);
 const bytes = await response.arrayBuffer();
 const buffers = decodeTufts(bytes, manifest, groupFromManifest(manifest, 'meadow'));
+
+interface DemoQaReceipt {
+  requestedBackend: 'webgpu' | 'webgl2';
+  actualBackend: 'webgpu' | 'webgl2';
+  scene: SceneName;
+  player: { x: number; y: number; z: number };
+  draws: number;
+  triangles: number;
+  geometries: number;
+  textures: number;
+  frameP50Ms: number;
+  frameP95Ms: number;
+}
+
+declare global {
+  interface Window {
+    __FIELD_GRASS_QA__?: DemoQaReceipt;
+    render_game_to_text?: () => string;
+  }
+}
 
 let rendererPromise: Promise<THREE.WebGPURenderer> | null = null;
 function createRenderer(props: ConstructorParameters<typeof THREE.WebGPURenderer>[0]) {
@@ -43,6 +70,25 @@ function createRenderer(props: ConstructorParameters<typeof THREE.WebGPURenderer
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.03;
+    const actualBackend = renderer.backend.constructor.name.toLowerCase().includes('webgpu')
+      ? 'webgpu'
+      : 'webgl2';
+    window.__FIELD_GRASS_QA__ = {
+      requestedBackend: forceWebGL ? 'webgl2' : 'webgpu',
+      actualBackend,
+      scene: 'field',
+      player: { x: 0, y: 0.72, z: 0 },
+      draws: 0,
+      triangles: 0,
+      geometries: 0,
+      textures: 0,
+      frameP50Ms: 0,
+      frameP95Ms: 0,
+    };
+    window.render_game_to_text = () => JSON.stringify({
+      coordinates: 'x east, y up, z south; origin at scene center',
+      ...window.__FIELD_GRASS_QA__,
+    });
     return renderer;
   })();
   return rendererPromise;
@@ -55,6 +101,7 @@ interface MoveIntent {
 
 type ControlMode = 'drive' | 'orbit';
 type LookName = 'field' | 'storybook';
+type SceneName = 'field' | 'island';
 
 interface DemoLook {
   readonly label: string;
@@ -89,11 +136,13 @@ interface CameraActions {
 function OrbitCamera({
   mode,
   actions,
+  scene,
 }: {
   readonly mode: ControlMode;
   readonly actions: MutableRefObject<CameraActions | null>;
+  readonly scene: SceneName;
 }) {
-  const { camera, gl } = useThree();
+  const { camera, gl, size } = useThree();
   const controls = useMemo(() => new OrbitControls(camera, gl.domElement), [camera, gl]);
   useEffect(() => {
     controls.target.set(0, 0, 0);
@@ -101,12 +150,18 @@ function OrbitCamera({
     controls.dampingFactor = 0.075;
     controls.enablePan = false;
     controls.minDistance = 10;
-    controls.maxDistance = 74;
+    controls.maxDistance = scene === 'island' ? 96 : 74;
     controls.maxPolarAngle = Math.PI * 0.48;
     controls.zoomToCursor = true;
     const reset = () => {
-      camera.position.set(-24, 20, 30);
-      controls.target.set(0, 0, 0);
+      if (scene === 'island') {
+        if (size.width / size.height < 0.78) camera.position.set(-51, 38, 56);
+        else camera.position.set(-31, 24, 34);
+        controls.target.set(0, 1.1, 0);
+      } else {
+        camera.position.set(-24, 20, 30);
+        controls.target.set(0, 0, 0);
+      }
       controls.update();
     };
     actions.current = {
@@ -127,7 +182,7 @@ function OrbitCamera({
       actions.current = null;
       controls.dispose();
     };
-  }, [actions, camera, controls]);
+  }, [actions, camera, controls, scene, size.height, size.width]);
   useEffect(() => {
     controls.enableRotate = mode === 'orbit';
     controls.enableZoom = true;
@@ -139,12 +194,14 @@ function OrbitCamera({
 function CapsuleController({
   field,
   intent,
+  terrain,
 }: {
   readonly field: InteractionField;
   readonly intent: MutableRefObject<MoveIntent>;
+  readonly terrain?: IslandHeightfield;
 }) {
   const marker = useRef<THREE.Mesh>(null);
-  const position = useRef(new THREE.Vector3(0, 0.72, 0));
+  const position = useRef(new THREE.Vector3(0, (terrain?.heightAt(0, 0) ?? 0) + 0.72, 0));
   const heading = useRef(0);
   const forward = useMemo(() => new THREE.Vector3(), []);
   const right = useMemo(() => new THREE.Vector3(), []);
@@ -162,12 +219,23 @@ function CapsuleController({
     if (movement.lengthSq() > 0.001) {
       movement.normalize();
       const step = Math.min(dt, 0.05) * 7.2;
-      position.current.addScaledVector(movement, step);
-      position.current.x = THREE.MathUtils.clamp(position.current.x, -29, 29);
-      position.current.z = THREE.MathUtils.clamp(position.current.z, -29, 29);
-      heading.current = Math.atan2(movement.z, movement.x);
+      const nextX = THREE.MathUtils.clamp(position.current.x + movement.x * step, -29, 29);
+      const nextZ = THREE.MathUtils.clamp(position.current.z + movement.z * step, -29, 29);
+      if (!terrain || isIslandWalkable(terrain, nextX, nextZ)) {
+        position.current.x = nextX;
+        position.current.z = nextZ;
+        heading.current = Math.atan2(movement.z, movement.x);
+      }
     }
+    position.current.y = (terrain?.heightAt(position.current.x, position.current.z) ?? 0) + 0.72;
     marker.current?.position.copy(position.current);
+    if (window.__FIELD_GRASS_QA__) {
+      window.__FIELD_GRASS_QA__.player = {
+        x: position.current.x,
+        y: position.current.y,
+        z: position.current.z,
+      };
+    }
     field.update(Math.min(dt, 0.05), [{
       slot: 0,
       x: position.current.x,
@@ -182,6 +250,56 @@ function CapsuleController({
       <meshStandardMaterial color="#f4e1bd" roughness={0.78} />
     </mesh>
   );
+}
+
+function RendererReceipt() {
+  const samples = useRef<number[]>([]);
+  useFrame(({ gl, scene }, dt) => {
+    if (!window.__FIELD_GRASS_QA__) return;
+    const milliseconds = Math.min(dt, 0.1) * 1000;
+    samples.current.push(milliseconds);
+    if (samples.current.length > 240) samples.current.shift();
+    if (samples.current.length < 5) return;
+    const sorted = [...samples.current].sort((a, b) => a - b);
+    const percentile = (fraction: number) => sorted[Math.min(
+      sorted.length - 1,
+      Math.floor(sorted.length * fraction),
+    )] ?? 0;
+    let draws = 0;
+    let triangles = 0;
+    scene.traverse((object) => {
+      if (!(object instanceof THREE.Mesh) || !object.visible) return;
+      draws++;
+      const positionCount = object.geometry.getAttribute('position')?.count ?? 0;
+      const primitiveCount = (object.geometry.index?.count ?? positionCount) / 3;
+      triangles += primitiveCount * (object instanceof THREE.InstancedMesh ? object.count : 1);
+    });
+    window.__FIELD_GRASS_QA__.draws = draws;
+    window.__FIELD_GRASS_QA__.triangles = Math.round(triangles);
+    window.__FIELD_GRASS_QA__.geometries = gl.info.memory.geometries;
+    window.__FIELD_GRASS_QA__.textures = gl.info.memory.textures;
+    window.__FIELD_GRASS_QA__.frameP50Ms = percentile(0.5);
+    window.__FIELD_GRASS_QA__.frameP95Ms = percentile(0.95);
+  });
+  return null;
+}
+
+function BackendBadge() {
+  const [backend, setBackend] = useState('Starting renderer');
+  useEffect(() => {
+    let frame = 0;
+    const update = () => {
+      const receipt = window.__FIELD_GRASS_QA__;
+      if (receipt) {
+        setBackend(receipt.actualBackend === 'webgpu' ? 'WebGPU' : 'WebGL2');
+        return;
+      }
+      frame = window.requestAnimationFrame(update);
+    };
+    update();
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  return <p className="backend-badge" aria-live="polite">{backend}</p>;
 }
 
 function Meadow({
@@ -222,7 +340,49 @@ function Meadow({
       </mesh>
       <GrassLayer buffers={buffers} interaction={interaction} preset={look.preset} />
       <CapsuleController field={interaction} intent={intent} />
-      <OrbitCamera mode={mode} actions={cameraActions} />
+      <OrbitCamera mode={mode} actions={cameraActions} scene="field" />
+    </>
+  );
+}
+
+function IslandMeadow({
+  intent,
+  mode,
+  cameraActions,
+  look,
+}: {
+  readonly intent: MutableRefObject<MoveIntent>;
+  readonly mode: ControlMode;
+  readonly cameraActions: MutableRefObject<CameraActions | null>;
+  readonly look: DemoLook;
+}) {
+  const terrain = useMemo(() => createIslandHeightfield(), []);
+  const islandBuffers = useMemo(() => createIslandGrassBuffers(terrain), [terrain]);
+  const interaction = useMemo(
+    () => createInteractionField({
+      minX: -23,
+      maxX: 23,
+      minZ: -23,
+      maxZ: 23,
+      maxBodies: 4,
+      ghostsPerBody: 12,
+      maxAge: 0.9,
+      ghostBirthDuration: 0.12,
+      strength: 0.48,
+    }),
+    [],
+  );
+  useEffect(() => () => interaction.dispose(), [interaction]);
+  return (
+    <>
+      <color attach="background" args={['#b9d2d2']} />
+      <fog attach="fog" args={['#b9d2d2', 58, 132]} />
+      <hemisphereLight args={['#e7f1e8', '#53604d', 1.45]} />
+      <directionalLight position={[-18, 24, 16]} intensity={2.55} color="#f4d7a0" />
+      <IslandTerrainView field={terrain} />
+      <GrassLayer buffers={islandBuffers} interaction={interaction} preset={look.preset} />
+      <CapsuleController field={interaction} intent={intent} terrain={terrain} />
+      <OrbitCamera mode={mode} actions={cameraActions} scene="island" />
     </>
   );
 }
@@ -270,6 +430,7 @@ function Demo() {
   const cameraActions = useRef<CameraActions | null>(null);
   const [mode, setMode] = useState<ControlMode>('drive');
   const [lookName, setLookName] = useState<LookName>('field');
+  const [sceneName, setSceneName] = useState<SceneName>('field');
   const [reducedMotion, setReducedMotion] = useState(false);
   useEffect(() => {
     const query = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -293,6 +454,9 @@ function Demo() {
       },
     };
   }, [lookName, reducedMotion]);
+  useEffect(() => {
+    if (window.__FIELD_GRASS_QA__) window.__FIELD_GRASS_QA__.scene = sceneName;
+  }, [sceneName]);
   useEffect(() => {
     const held = new Set<string>();
     const publish = () => {
@@ -369,9 +533,26 @@ function Demo() {
           shadows={false}
           fallback={<p className="canvas-fallback">This browser cannot start the 3D renderer.</p>}
         >
-          <Meadow intent={intent} mode={mode} cameraActions={cameraActions} look={look} />
+          <RendererReceipt />
+          {sceneName === 'field' ? (
+            <Meadow intent={intent} mode={mode} cameraActions={cameraActions} look={look} />
+          ) : (
+            <IslandMeadow intent={intent} mode={mode} cameraActions={cameraActions} look={look} />
+          )}
         </Canvas>
         <div className="demo-toolbar" aria-label="Demo controls">
+          <div className="scene-switch" role="group" aria-label="Example scene">
+            <button
+              type="button"
+              aria-pressed={sceneName === 'field'}
+              onClick={() => setSceneName('field')}
+            >Flat Field</button>
+            <button
+              type="button"
+              aria-pressed={sceneName === 'island'}
+              onClick={() => setSceneName('island')}
+            >Island Terrain</button>
+          </div>
           <div className="mode-switch" role="group" aria-label="Control mode">
             <button
               type="button"
@@ -403,15 +584,12 @@ function Demo() {
         {mode === 'drive' ? <DirectionPad intent={intent} /> : null}
         <div className="demo-help">
           {mode === 'drive' ? (
-            <p><strong>Drive</strong> WASD, arrows, or direction pad. Wheel or pinch to zoom.</p>
+            <p><strong>{sceneName === 'island' ? 'Island' : 'Drive'}</strong> WASD, arrows, or direction pad. Wheel or pinch to zoom.</p>
           ) : (
             <p><strong>Orbit</strong> drag the field. Wheel, pinch, or use −/+ to zoom.</p>
           )}
         </div>
-        <p className="backend-badge" aria-live="polite">
-          {new URLSearchParams(window.location.search).get('backend') === 'webgl2'
-            || !('gpu' in navigator) ? 'WebGL2' : 'WebGPU'}
-        </p>
+        <BackendBadge />
       </section>
       <section className="docs" id="use" aria-label="Package documentation">
         <article className="install-card">
@@ -464,6 +642,19 @@ interaction.update(dt, bodies)`}</code></pre>
             <li>Prefix-safe density tiers from one committed scatter</li>
             <li>Fixed interaction textures and no frame-loop allocation</li>
           </ul>
+        </article>
+        <article className="code-card terrain-card">
+          <div>
+            <p className="section-label">Terrain integration example</p>
+            <h2>One heightfield, four jobs.</h2>
+            <p>The island example keeps terrain in demo code. One deterministic CPU heightfield builds the mesh, grounds the capsule, supplies smooth slope normals, and places every tuft at the exact sampled height.</p>
+          </div>
+          <pre><code>{`const terrain = createIslandHeightfield(seed)
+const groups = generateScatter(recipe, (x, z) => ({
+  y: terrain.heightAt(x, z),
+  accept: terrain.heightAt(x, z) > seaLevel
+    && terrain.normalAt(x, z)[1] > minNormalY,
+}))`}</code></pre>
         </article>
       </section>
       <footer>

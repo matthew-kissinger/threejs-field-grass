@@ -63,7 +63,7 @@ h1 { margin: 0; max-width: 810px; font-size: clamp(48px, 8vw, 94px); font-weight
 }
 .viewport canvas { display: block; width: 100%; height: 100%; }
 .demo-toolbar { position: absolute; top: 14px; left: 14px; display: flex; flex-wrap: wrap; gap: 8px; z-index: 2; }
-.mode-switch, .view-buttons, .look-switch {
+.scene-switch, .mode-switch, .view-buttons, .look-switch {
   display: flex;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.22);
@@ -130,6 +130,7 @@ pre code { display: block; padding: 16px 18px; }
 .code-card, .compat-card { display: grid; grid-template-columns: 0.8fr 1.2fr; gap: clamp(22px, 5vw, 64px); align-items: center; padding: clamp(24px, 5vw, 50px); }
 .code-card pre { margin: 0; }
 .react-card { border-left: 4px solid #81925e !important; }
+.terrain-card { border-left: 4px solid #7197a2 !important; }
 .compat-card ul { margin: 0; padding-left: 20px; color: #4e655c; line-height: 1.85; }
 footer { display: flex; justify-content: space-between; gap: 24px; padding: 32px 2px 0; color: #5b6e65; font-size: 12px; }
 footer > div:first-child { display: grid; gap: 5px; }
@@ -145,6 +146,7 @@ footer a { color: #365f4c; font-weight: 700; text-underline-offset: 3px; }
   .demo-toolbar { left: 10px; right: 10px; top: 10px; gap: 6px; }
   .demo-toolbar button { min-height: 36px; padding: 0 9px; }
   .look-switch { order: 3; }
+  .scene-switch { order: -1; width: 100%; }
   .site-nav { margin-bottom: 48px; }
   .site-nav > div a:not(:last-child) { display: none; }
   .demo-help { left: 10px; right: 10px; bottom: 10px; max-width: none; transform: none; margin-right: 66px; }
@@ -160,7 +162,7 @@ footer a { color: #365f4c; font-weight: 700; text-underline-offset: 3px; }
   h1 { font-size: 51px; }
   .viewport { min-height: 500px; }
   .demo-toolbar { display: grid; grid-template-columns: 1fr; width: max-content; }
-  .mode-switch, .view-buttons, .look-switch { width: max-content; }
+  .scene-switch, .mode-switch, .view-buttons, .look-switch { width: max-content; }
   .demo-help { bottom: 10px; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }

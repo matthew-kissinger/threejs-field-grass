@@ -16,7 +16,8 @@ There are no textures, downloaded models, runtime random placement, shader
 forks, or sibling-repository imports. The core API is plain Three.js. A thin
 React Three Fiber adapter is available at `threejs-field-grass/react`.
 
-The hosted demo controls are intentionally separate from both entry points.
+The hosted demo includes both a flat field and a compact island terrain example.
+Its controls and terrain code are intentionally separate from both entry points.
 OrbitControls, keyboard handling, and the touch direction pad are examples, not
 runtime dependencies or public package API.
 
@@ -45,7 +46,9 @@ npm run bake
 npm run dev
 ```
 
-The demo contains 18,000 tufts and 126,000 blades in one draw. Move the pale
+The default demo contains 18,000 tufts and 126,000 blades in one draw. Switch to
+**Island Terrain** to see the same package integrated with a deterministic CPU
+heightfield and simple water plane. Move the pale
 capsule with WASD, arrow keys, or the on-screen direction pad. Drag the meadow
 to orbit the camera and use the wheel or pinch gesture to zoom. The capsule's
 wake exposes the spring recovery instead of hiding it in an automated loop.
@@ -135,6 +138,18 @@ const { bytes, manifest } = encodeScatter('tools/bake-grass.ts', recipe, groups)
 
 Commit both the recipe and its generated binary. A binary without a reproducible
 recipe is not an acceptable source asset.
+
+### Terrain example
+
+The island in `demo/examples/island` is independently written demo code, not
+part of the library. A single `Float32Array` heightfield supplies the rendered
+vertices, triangle-aware `heightAt` grounding, smooth slope normals, and the
+`generateScatter` sampler. The sampler rejects submerged and steep locations,
+so the grass remains aligned to the same terrain truth as the capsule.
+
+This architecture was informed by the general source-of-truth pattern used in
+the author's Kiln Island prototype. No Kiln assets, game systems, or source code
+are included here.
 
 ## Design boundaries
 

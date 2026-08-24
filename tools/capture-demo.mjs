@@ -32,7 +32,11 @@ let browser;
 try {
   await mkdir(output, { recursive: true });
   await ready();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, args: [
+    '--enable-unsafe-webgpu',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+  ] });
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   await desktop.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await desktop.locator('canvas').waitFor();
@@ -57,6 +61,16 @@ try {
   await desktop.getByRole('button', { name: 'Reset view' }).click();
   await desktop.waitForTimeout(800);
   await desktop.locator('.viewport').screenshot({ path: resolve(output, 'storygrass-preset.png') });
+  await desktop.getByRole('button', { name: 'Island Terrain' }).click();
+  await desktop.waitForTimeout(1000);
+  await desktop.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-desktop-webgpu.png') });
+
+  const desktopFallback = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  await desktopFallback.goto(`http://127.0.0.1:${port}/?backend=webgl2`, { waitUntil: 'networkidle' });
+  await desktopFallback.getByRole('button', { name: 'Island Terrain' }).click();
+  await desktopFallback.waitForTimeout(1000);
+  await desktopFallback.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-desktop-webgl2.png') });
+  await desktopFallback.close();
 
   const mobile = await browser.newPage({
     viewport: { width: 390, height: 844 },
@@ -73,6 +87,21 @@ try {
   await mobile.waitForTimeout(650);
   await forward.dispatchEvent('pointerup', { pointerId: 1, pointerType: 'touch', isPrimary: true });
   await mobile.locator('.viewport').screenshot({ path: resolve(output, 'field-mobile-touch-wake.png') });
+  await mobile.getByRole('button', { name: 'Island Terrain' }).click({ force: true });
+  await mobile.waitForTimeout(900);
+  await mobile.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-mobile-webgl2.png') });
+
+  const mobileWebGpu = await browser.newPage({
+    viewport: { width: 390, height: 844 },
+    deviceScaleFactor: 1,
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mobileWebGpu.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+  await mobileWebGpu.getByRole('button', { name: 'Island Terrain' }).click({ force: true });
+  await mobileWebGpu.waitForTimeout(900);
+  await mobileWebGpu.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-mobile-webgpu.png') });
+  await mobileWebGpu.close();
   await mobile.close();
   await desktop.close();
   console.log(`captured field-grass QA to ${output}`);
