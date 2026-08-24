@@ -39,6 +39,7 @@ import {
   Fn,
   float,
   fract,
+  floor,
   length,
   max as tslMax,
   min as tslMin,
@@ -178,11 +179,12 @@ const CLUMP_HUE = 0.45;
 /** How trodden ground is coloured: the surround's duller green carried toward
  *  the pen floor's warm trodden earth. */
 const WORN_EARTH = 0.35;
-/** Painted breakup, at the SAME frequencies scene/Terrain.tsx uses for the
- *  ground, so a clump standing on a browner patch is itself browner. */
-const PATCH_SCALE = 0.07;
-const MOTTLE_SCALE = 0.26;
-const MOTTLE_WEIGHT = 0.45;
+/** Static pasture breakup uses smooth two-dimensional value noise. A single
+ *  projected sine remains visible as a diagonal lane across a wide field even
+ *  after domain warping, while value-noise cells have no preferred diagonal. */
+const PATCH_SCALE = 0.055;
+const MOTTLE_SCALE = 0.19;
+const MOTTLE_WEIGHT = 0.34;
 
 export interface GrassMaterialStyle {
   /** Metres per second travelled by the shared wind frame. */
@@ -287,6 +289,49 @@ function sineHashField(
       .sub(phase.mul(float(0.73))),
   );
   return sin(x.add(z.mul(float(0.61))).add(phase).add(cross.mul(float(0.72))));
+}
+
+/** Deterministic scalar at one integer lattice point. Kept local instead of
+ *  using a texture so the library retains its zero-texture material contract. */
+function latticeValue(cell: TSLNode): TSLNode {
+  return fract(
+    sin(dot(cell, vec2(127.1, 311.7))).mul(float(43758.5453123)),
+  ).mul(float(2)).sub(float(1));
+}
+
+/** Smooth two-dimensional value noise in roughly [-1, 1]. Four lattice values
+ *  blend through a quintic curve, producing irregular patches without the
+ *  broad parallel bands that a projected trigonometric field leaves behind. */
+function valueNoiseField(
+  root: TSLNode,
+  frequency: number,
+  angle: number,
+  offsetX: number,
+  offsetZ: number,
+): TSLNode {
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const rotated = vec2(
+    root.x.mul(float(c)).add(root.y.mul(float(s))),
+    root.y.mul(float(c)).sub(root.x.mul(float(s))),
+  ).mul(float(frequency)).add(vec2(offsetX, offsetZ));
+  const cell = floor(rotated);
+  const local = fract(rotated);
+  const fade = local
+    .mul(local)
+    .mul(local)
+    .mul(local.mul(local.mul(float(6)).sub(float(15))).add(float(10)));
+  const near = mix(
+    latticeValue(cell),
+    latticeValue(cell.add(vec2(1, 0))),
+    fade.x,
+  );
+  const far = mix(
+    latticeValue(cell.add(vec2(0, 1))),
+    latticeValue(cell.add(vec2(1, 1))),
+    fade.x,
+  );
+  return mix(near, far, fade.y);
 }
 
 /** One octave of travelling, rotated flow, in roughly [-1, 1]. */
@@ -499,8 +544,8 @@ export function makeGrassMaterial(inputs: GrassMaterialInputs): THREE.MeshBasicN
 
   // --- colour ---------------------------------------------------------------
 
-  const patches = sineHashField(root, PATCH_SCALE, 0.38, float(0.7));
-  const mottle = sineHashField(root, MOTTLE_SCALE, -1.13, float(2.4));
+  const patches = valueNoiseField(root, PATCH_SCALE, 0.38, 11.7, -4.3);
+  const mottle = valueNoiseField(root, MOTTLE_SCALE, -1.13, -7.1, 9.8);
   const blend = smoothstep(
     float(-0.35),
     float(0.35),

@@ -72,6 +72,10 @@ describe('material boundary', () => {
     expect(source).not.toContain('const SHEEN_MIN = 0.88');
     expect(source).not.toContain('const SHEEN_MAX = 1.14');
     expect(source).not.toMatch(/\.mul\(sheen\)/);
+    expect(source).toContain('function valueNoiseField(');
+    expect(source).toContain('const patches = valueNoiseField(');
+    expect(source).toContain('const mottle = valueNoiseField(');
+    expect(source).not.toContain('const patches = sineHashField(');
     expect(source).not.toContain('new THREE.ShaderMaterial');
     expect(source).not.toContain('.onBeforeCompile');
     expect(source).not.toMatch(/@app|@sim|\.\.\/\.\.\/\.\.\/herd/);
