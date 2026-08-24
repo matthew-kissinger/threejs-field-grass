@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/types",
+    "declaration": true,
+    "declarationMap": false,
+    "emitDeclarationOnly": true,
+    "types": ["@react-three/fiber", "react"]
+  },
+  "include": [
+    "src/index.ts",
+    "src/react.ts",
+    "src/core/**/*.ts",
+    "src/three/**/*.ts",
+    "src/react/**/*.tsx"
+  ],
+  "exclude": ["src/demo", "tests"]
+}

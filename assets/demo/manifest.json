@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "recipe": "tools/bake-demo.ts",
+  "seed": 20260824,
+  "format": "tuft12",
+  "stride": 12,
+  "encoding": {
+    "xzRange": 31.999912615142648,
+    "yRange": 1,
+    "heightMin": 0.6200077619357035,
+    "heightMax": 1.2799482552986592
+  },
+  "groups": [
+    {
+      "id": "meadow",
+      "offset": 0,
+      "count": 18000
+    }
+  ]
+}

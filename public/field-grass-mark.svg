@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Three.js Field Grass mark">
+  <rect width="64" height="64" rx="8" fill="#14271f"/>
+  <path d="M10 51H54M25 51C24 37 19 27 13 19M34 51C35 34 36 22 35 13M43 51C45 38 49 31 56 27" fill="none" stroke="#b8c979" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M43 51C48 49 52 48 57 49" fill="none" stroke="#b8c979" stroke-width="5" stroke-linecap="round"/>
+</svg>

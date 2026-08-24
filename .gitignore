@@ -1,0 +1,10 @@
+node_modules/
+dist/
+demo-dist/
+coverage/
+captures/
+output/
+.playwright-cli/
+playwright-report/
+test-results/
+*.log

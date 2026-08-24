@@ -1,0 +1,12 @@
+{
+  "name": "Three.js Field Grass",
+  "short_name": "Field Grass",
+  "description": "Interactive TSL grass for Three.js",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f3f1e9",
+  "theme_color": "#14271f",
+  "icons": [
+    { "src": "./field-grass-mark.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
