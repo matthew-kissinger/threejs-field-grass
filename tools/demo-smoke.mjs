@@ -116,13 +116,20 @@ async function verify(browser, url, viewport, scene, mobile = false) {
 let browser;
 try {
   await waitForServer();
+  const browserBackend = process.env.FIELD_GRASS_BROWSER_BACKEND ?? 'auto';
+  if (!['auto', 'webgl2'].includes(browserBackend)) {
+    throw new Error(`Unsupported FIELD_GRASS_BROWSER_BACKEND: ${browserBackend}`);
+  }
+  const defaultUrl = browserBackend === 'webgl2'
+    ? `http://127.0.0.1:${port}/?backend=webgl2`
+    : `http://127.0.0.1:${port}/`;
   browser = await chromium.launch({ headless: true, args: [
     '--enable-unsafe-webgpu',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
   ] });
-  await verify(browser, `http://127.0.0.1:${port}/`, { width: 1280, height: 900 }, 'field');
-  await verify(browser, `http://127.0.0.1:${port}/`, { width: 390, height: 844 }, 'island', true);
+  await verify(browser, defaultUrl, { width: 1280, height: 900 }, 'field');
+  await verify(browser, defaultUrl, { width: 390, height: 844 }, 'island', true);
   await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 1280, height: 900 }, 'island');
   await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 390, height: 844 }, 'field', true);
   console.log('demo browser smoke passed');
