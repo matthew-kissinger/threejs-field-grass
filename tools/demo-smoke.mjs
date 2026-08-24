@@ -86,6 +86,44 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   if (!mobile && scene === 'field') {
     await page.getByRole('button', { name: 'Enter fullscreen' }).click();
     await page.waitForFunction(() => document.fullscreenElement?.classList.contains('viewport'));
+    const fullscreenCanvas = page.locator('canvas');
+    const fullscreenBounds = await fullscreenCanvas.boundingBox();
+    if (!fullscreenBounds) throw new Error('Fullscreen canvas has no bounds for orbit test');
+    const beforeFullscreenOrbit = await page.evaluate(() => window.__FIELD_GRASS_QA__?.camera);
+    await page.mouse.move(
+      fullscreenBounds.x + fullscreenBounds.width * 0.5,
+      fullscreenBounds.y + fullscreenBounds.height * 0.55,
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      fullscreenBounds.x + fullscreenBounds.width * 0.62,
+      fullscreenBounds.y + fullscreenBounds.height * 0.47,
+      { steps: 6 },
+    );
+    await page.mouse.up();
+    await page.waitForTimeout(180);
+    const afterFullscreenOrbit = await page.evaluate(() => window.__FIELD_GRASS_QA__?.camera);
+    if (!beforeFullscreenOrbit || !afterFullscreenOrbit || Math.hypot(
+      afterFullscreenOrbit.x - beforeFullscreenOrbit.x,
+      afterFullscreenOrbit.y - beforeFullscreenOrbit.y,
+      afterFullscreenOrbit.z - beforeFullscreenOrbit.z,
+    ) < 0.05) throw new Error('Orbit stopped responding after entering fullscreen');
+    const radiusBeforeWheel = Math.hypot(
+      afterFullscreenOrbit.x,
+      afterFullscreenOrbit.y,
+      afterFullscreenOrbit.z,
+    );
+    await page.mouse.wheel(0, -480);
+    await page.waitForTimeout(180);
+    const afterFullscreenWheel = await page.evaluate(() => window.__FIELD_GRASS_QA__?.camera);
+    const radiusAfterWheel = afterFullscreenWheel ? Math.hypot(
+      afterFullscreenWheel.x,
+      afterFullscreenWheel.y,
+      afterFullscreenWheel.z,
+    ) : radiusBeforeWheel;
+    if (Math.abs(radiusAfterWheel - radiusBeforeWheel) < 0.05) {
+      throw new Error('Wheel zoom stopped responding after entering fullscreen');
+    }
     await page.getByRole('button', { name: 'Exit fullscreen' }).click();
     await page.waitForFunction(() => document.fullscreenElement === null);
   }

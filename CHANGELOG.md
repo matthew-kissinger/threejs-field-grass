@@ -11,3 +11,4 @@
 - Replaced ranked per-cell interactor selection with a continuous directional
   deformation field and stable per-blade fold variation.
 - Added simultaneous movement/orbit controls, fullscreen, and a subtle FPS badge.
+- Kept orbit and wheel controls connected across fullscreen and viewport resizes.

@@ -46,6 +46,7 @@ interface DemoQaReceipt {
   actualBackend: 'webgpu' | 'webgl2';
   scene: SceneName;
   player: { x: number; y: number; z: number };
+  camera: { x: number; y: number; z: number };
   draws: number;
   triangles: number;
   geometries: number;
@@ -86,6 +87,7 @@ function createRenderer(props: ConstructorParameters<typeof THREE.WebGPURenderer
       actualBackend,
       scene: 'field',
       player: { x: 0, y: 0.72, z: 0 },
+      camera: { x: -24, y: 20, z: 30 },
       draws: 0,
       triangles: 0,
       geometries: 0,
@@ -149,18 +151,23 @@ function OrbitCamera({
 }) {
   const { camera, gl, size } = useThree();
   const controls = useMemo(() => new OrbitControls(camera, gl.domElement), [camera, gl]);
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   useEffect(() => {
     controls.target.set(0, 0, 0);
     controls.enableDamping = true;
     controls.dampingFactor = 0.075;
     controls.enablePan = false;
+    controls.enableRotate = true;
+    controls.enableZoom = true;
     controls.minDistance = 10;
     controls.maxDistance = scene === 'island' ? 96 : 74;
     controls.maxPolarAngle = Math.PI * 0.48;
     controls.zoomToCursor = true;
     const reset = () => {
+      const currentSize = sizeRef.current;
       if (scene === 'island') {
-        if (size.width / size.height < 0.78) camera.position.set(-43, 32, 48);
+        if (currentSize.width / currentSize.height < 0.78) camera.position.set(-43, 32, 48);
         else camera.position.set(-31, 24, 34);
         controls.target.set(0, 1.1, 0);
       } else {
@@ -187,11 +194,7 @@ function OrbitCamera({
       actions.current = null;
       controls.dispose();
     };
-  }, [actions, camera, controls, scene, size.height, size.width]);
-  useEffect(() => {
-    controls.enableRotate = true;
-    controls.enableZoom = true;
-  }, [controls]);
+  }, [actions, camera, controls, scene]);
   useFrame(() => controls.update(), -1);
   return null;
 }
@@ -258,7 +261,7 @@ function CapsuleController({
 
 function RendererReceipt() {
   const samples = useRef<number[]>([]);
-  useFrame(({ gl, scene }, dt) => {
+  useFrame(({ camera, gl, scene }, dt) => {
     if (!window.__FIELD_GRASS_QA__) return;
     const milliseconds = Math.min(dt, 0.1) * 1000;
     samples.current.push(milliseconds);
@@ -279,6 +282,11 @@ function RendererReceipt() {
       triangles += primitiveCount * (object instanceof THREE.InstancedMesh ? object.count : 1);
     });
     window.__FIELD_GRASS_QA__.draws = draws;
+    window.__FIELD_GRASS_QA__.camera = {
+      x: camera.position.x,
+      y: camera.position.y,
+      z: camera.position.z,
+    };
     window.__FIELD_GRASS_QA__.triangles = Math.round(triangles);
     window.__FIELD_GRASS_QA__.geometries = gl.info.memory.geometries;
     window.__FIELD_GRASS_QA__.textures = gl.info.memory.textures;
