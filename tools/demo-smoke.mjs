@@ -27,8 +27,9 @@ async function waitForServer() {
   throw new Error('Demo preview did not become ready');
 }
 
-async function verify(browser, url, viewport, scene) {
-  const page = await browser.newPage({ viewport });
+async function verify(browser, url, viewport, scene, mobile = false) {
+  console.log(`checking ${scene} at ${viewport.width}x${viewport.height}${mobile ? ' touch' : ''}: ${url}`);
+  const page = await browser.newPage({ viewport, isMobile: mobile, hasTouch: mobile });
   const errors = [];
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text());
@@ -40,23 +41,45 @@ async function verify(browser, url, viewport, scene) {
     await page.getByRole('button', { name: 'Island Terrain' }).click();
     await page.waitForTimeout(900);
   }
-  const canvas = await page.locator('canvas').evaluate((element) => ({
+  const canvasSize = await page.locator('canvas').evaluate((element) => ({
     width: element.width,
     height: element.height,
     clientWidth: element.clientWidth,
     clientHeight: element.clientHeight,
   }));
-  if (canvas.width <= 0 || canvas.height <= 0 || canvas.clientWidth <= 0 || canvas.clientHeight <= 0) {
-    throw new Error(`Blank canvas dimensions: ${JSON.stringify(canvas)}`);
+  if (canvasSize.width <= 0 || canvasSize.height <= 0 || canvasSize.clientWidth <= 0 || canvasSize.clientHeight <= 0) {
+    throw new Error(`Blank canvas dimensions: ${JSON.stringify(canvasSize)}`);
   }
   const beforeMove = await page.evaluate(() => window.__FIELD_GRASS_QA__?.player);
-  await page.evaluate(() => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-  });
-  await page.keyboard.down('w');
-  await page.waitForTimeout(300);
-  await page.keyboard.up('w');
+  if (mobile) {
+    const forward = page.getByRole('button', { name: 'Move forward' });
+    await forward.dispatchEvent('pointerdown', {
+      pointerId: 11,
+      pointerType: 'touch',
+      isPrimary: true,
+    });
+    await page.waitForTimeout(300);
+    await forward.dispatchEvent('pointercancel', {
+      pointerId: 11,
+      pointerType: 'touch',
+      isPrimary: true,
+    });
+  } else {
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+    await page.keyboard.down('w');
+    await page.waitForTimeout(300);
+    await page.keyboard.up('w');
+  }
   await page.getByRole('button', { name: 'Orbit' }).click();
+  const canvas = page.locator('canvas');
+  const bounds = await canvas.boundingBox();
+  if (!bounds) throw new Error('Canvas has no bounds for orbit test');
+  await page.mouse.move(bounds.x + bounds.width * 0.52, bounds.y + bounds.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(bounds.x + bounds.width * 0.62, bounds.y + bounds.height * 0.46, { steps: 6 });
+  await page.mouse.up();
   await page.getByRole('button', { name: 'Zoom in' }).click();
   await page.getByRole('button', { name: 'Reset view' }).click();
   await page.getByRole('button', { name: 'Storygrass' }).click();
@@ -70,6 +93,15 @@ async function verify(browser, url, viewport, scene) {
     receipt.player.x - beforeMove.x,
     receipt.player.z - beforeMove.z,
   ) < 0.05) throw new Error('Capsule did not move across the selected scene');
+  if (mobile) {
+    const stoppedAt = { ...receipt.player };
+    await page.waitForTimeout(180);
+    const afterCancel = await page.evaluate(() => window.__FIELD_GRASS_QA__?.player);
+    if (!afterCancel || Math.hypot(
+      afterCancel.x - stoppedAt.x,
+      afterCancel.z - stoppedAt.z,
+    ) > 0.03) throw new Error('Touch movement remained active after pointercancel');
+  }
   if (url.includes('backend=webgl2') && receipt.actualBackend !== 'webgl2') {
     throw new Error(`Forced WebGL2 selected ${receipt.actualBackend}`);
   }
@@ -78,6 +110,7 @@ async function verify(browser, url, viewport, scene) {
   if (!textState || JSON.parse(textState).scene !== scene) throw new Error('Text state does not match scene');
   if (errors.length > 0) throw new Error(`Browser console errors:\n${errors.join('\n')}`);
   await page.close();
+  console.log(`passed ${scene} at ${viewport.width}x${viewport.height}`);
 }
 
 let browser;
@@ -89,9 +122,9 @@ try {
     '--disable-renderer-backgrounding',
   ] });
   await verify(browser, `http://127.0.0.1:${port}/`, { width: 1280, height: 900 }, 'field');
-  await verify(browser, `http://127.0.0.1:${port}/`, { width: 390, height: 844 }, 'island');
+  await verify(browser, `http://127.0.0.1:${port}/`, { width: 390, height: 844 }, 'island', true);
   await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 1280, height: 900 }, 'island');
-  await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 390, height: 844 }, 'field');
+  await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 390, height: 844 }, 'field', true);
   console.log('demo browser smoke passed');
 } finally {
   await browser?.close();

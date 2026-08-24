@@ -38,6 +38,14 @@ try {
     '--disable-renderer-backgrounding',
   ] });
   const desktop = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  const errors = [];
+  const watchErrors = (page) => {
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    page.on('pageerror', (error) => errors.push(error.message));
+  };
+  watchErrors(desktop);
   await desktop.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await desktop.locator('canvas').waitFor();
   await desktop.waitForTimeout(600);
@@ -70,6 +78,7 @@ try {
   await desktop.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-desktop-webgpu.png') });
 
   const desktopFallback = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  watchErrors(desktopFallback);
   await desktopFallback.goto(`http://127.0.0.1:${port}/?backend=webgl2`, { waitUntil: 'networkidle' });
   await desktopFallback.getByRole('button', { name: 'Island Terrain' }).click();
   await desktopFallback.waitForTimeout(1000);
@@ -86,6 +95,7 @@ try {
     isMobile: true,
     hasTouch: true,
   });
+  watchErrors(mobile);
   await mobile.goto(`http://127.0.0.1:${port}/?backend=webgl2`, { waitUntil: 'networkidle' });
   await mobile.locator('canvas').waitFor();
   await mobile.waitForTimeout(600);
@@ -105,6 +115,7 @@ try {
     isMobile: true,
     hasTouch: true,
   });
+  watchErrors(mobileWebGpu);
   await mobileWebGpu.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await mobileWebGpu.getByRole('button', { name: 'Island Terrain' }).click({ force: true });
   await mobileWebGpu.waitForTimeout(900);
@@ -116,6 +127,7 @@ try {
   await mobileWebGpu.close();
   await mobile.close();
   await desktop.close();
+  if (errors.length > 0) throw new Error(`Capture console errors:\n${errors.join('\n')}`);
   console.log(`captured field-grass QA to ${output}`);
 } finally {
   await browser?.close();
