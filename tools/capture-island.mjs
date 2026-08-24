@@ -47,6 +47,12 @@ async function capture(browser, requestedBackend, viewport, formFactor) {
   await page.waitForTimeout(1300);
   const receipt = await page.evaluate(() => window.__FIELD_GRASS_QA__);
   if (!receipt || receipt.scene !== 'island') throw new Error(`Missing island receipt: ${JSON.stringify(receipt)}`);
+  if (receipt.requestedBackend !== requestedBackend) {
+    throw new Error(`Island receipt requested ${receipt.requestedBackend}, expected ${requestedBackend}`);
+  }
+  if (requestedBackend === 'webgpu' && receipt.actualBackend !== 'webgpu') {
+    throw new Error(`WebGPU capture fell back to ${receipt.actualBackend}; no WebGPU evidence was written`);
+  }
   const clip = await page.locator('.viewport').boundingBox();
   if (!clip) throw new Error('Island viewport has no capture bounds');
   const name = `island-${formFactor}-requested-${requestedBackend}-actual-${receipt.actualBackend}.png`;
@@ -60,15 +66,18 @@ let browser;
 try {
   await mkdir(output, { recursive: true });
   await ready();
-  browser = await chromium.launch({ headless: true, args: [
+  // Use the installed Chrome channel for native WebGPU evidence. Playwright's
+  // bundled Chromium may expose navigator.gpu yet initialize Three's fallback.
+  browser = await chromium.launch({ channel: 'chrome', headless: true, args: [
     '--enable-unsafe-webgpu',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
   ] });
   const receipts = [];
-  receipts.push(await capture(browser, 'webgpu', { width: 1280, height: 900 }, 'desktop'));
+  const webgl2Only = process.argv.includes('--webgl2-only');
+  if (!webgl2Only) receipts.push(await capture(browser, 'webgpu', { width: 1280, height: 900 }, 'desktop'));
   receipts.push(await capture(browser, 'webgl2', { width: 1280, height: 900 }, 'desktop'));
-  receipts.push(await capture(browser, 'webgpu', { width: 390, height: 844 }, 'mobile'));
+  if (!webgl2Only) receipts.push(await capture(browser, 'webgpu', { width: 390, height: 844 }, 'mobile'));
   receipts.push(await capture(browser, 'webgl2', { width: 390, height: 844 }, 'mobile'));
   console.log(JSON.stringify(receipts, null, 2));
 } finally {

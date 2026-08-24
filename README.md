@@ -53,6 +53,9 @@ capsule with WASD, arrow keys, or the on-screen direction pad. Drag the meadow
 to orbit the camera and use the wheel or pinch gesture to zoom. The capsule's
 wake exposes the spring recovery instead of hiding it in an automated loop.
 Append `?backend=webgl2` to force the WebGL2 fallback for parity checks.
+Run `npm run test:webgpu` for a strict installed-Chrome WebGPU receipt. That
+command fails if Three.js silently selects its WebGL2 fallback, even when the
+browser exposes `navigator.gpu`.
 
 ## Core Three.js API
 

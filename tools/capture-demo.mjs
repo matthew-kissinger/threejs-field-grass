@@ -32,7 +32,7 @@ let browser;
 try {
   await mkdir(output, { recursive: true });
   await ready();
-  browser = await chromium.launch({ headless: true, args: [
+  browser = await chromium.launch({ channel: 'chrome', headless: true, args: [
     '--enable-unsafe-webgpu',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
@@ -41,6 +41,10 @@ try {
   await desktop.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await desktop.locator('canvas').waitFor();
   await desktop.waitForTimeout(600);
+  const desktopReceipt = await desktop.evaluate(() => window.__FIELD_GRASS_QA__);
+  if (desktopReceipt?.actualBackend !== 'webgpu') {
+    throw new Error(`Desktop WebGPU capture fell back: ${JSON.stringify(desktopReceipt)}`);
+  }
   await desktop.screenshot({ path: resolve(output, 'field-page-desktop.png'), fullPage: true });
   await desktop.locator('.viewport').screenshot({ path: resolve(output, 'field-rest-t0.png') });
   await desktop.waitForTimeout(3200);
@@ -69,6 +73,10 @@ try {
   await desktopFallback.goto(`http://127.0.0.1:${port}/?backend=webgl2`, { waitUntil: 'networkidle' });
   await desktopFallback.getByRole('button', { name: 'Island Terrain' }).click();
   await desktopFallback.waitForTimeout(1000);
+  const fallbackReceipt = await desktopFallback.evaluate(() => window.__FIELD_GRASS_QA__);
+  if (fallbackReceipt?.actualBackend !== 'webgl2') {
+    throw new Error(`Forced desktop WebGL2 capture selected ${fallbackReceipt?.actualBackend}`);
+  }
   await desktopFallback.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-desktop-webgl2.png') });
   await desktopFallback.close();
 
@@ -100,6 +108,10 @@ try {
   await mobileWebGpu.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
   await mobileWebGpu.getByRole('button', { name: 'Island Terrain' }).click({ force: true });
   await mobileWebGpu.waitForTimeout(900);
+  const mobileReceipt = await mobileWebGpu.evaluate(() => window.__FIELD_GRASS_QA__);
+  if (mobileReceipt?.actualBackend !== 'webgpu') {
+    throw new Error(`Mobile WebGPU capture fell back: ${JSON.stringify(mobileReceipt)}`);
+  }
   await mobileWebGpu.locator('.viewport').screenshot({ path: resolve(output, 'island-terrain-mobile-webgpu.png') });
   await mobileWebGpu.close();
   await mobile.close();

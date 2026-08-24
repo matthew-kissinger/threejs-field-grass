@@ -62,8 +62,10 @@
     "preview": "vite preview --config vite.demo.config.ts",
     "test:package": "node tools/test-package.mjs",
     "test:browser": "node tools/demo-smoke.mjs",
+    "test:webgpu": "node tools/webgpu-smoke.mjs",
     "capture:demo": "node tools/capture-demo.mjs",
     "capture:island": "node tools/capture-island.mjs",
+    "capture:island:webgl2": "node tools/capture-island.mjs --webgl2-only",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "prepack": "npm run check"
   },
