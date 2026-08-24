@@ -401,6 +401,26 @@ function DirectionPad({ intent }: { readonly intent: MutableRefObject<MoveIntent
     intent.current.x = (held.current.has('right') ? 1 : 0) - (held.current.has('left') ? 1 : 0);
     intent.current.z = (held.current.has('up') ? 1 : 0) - (held.current.has('down') ? 1 : 0);
   };
+  const clear = () => {
+    held.current.clear();
+    publish();
+  };
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') clear();
+    };
+    window.addEventListener('blur', clear);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      clear();
+      window.removeEventListener('blur', clear);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, []);
+  const release = (direction: string) => {
+    held.current.delete(direction);
+    publish();
+  };
   const bind = (direction: string) => ({
     onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => {
       try {
@@ -415,13 +435,10 @@ function DirectionPad({ intent }: { readonly intent: MutableRefObject<MoveIntent
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
-      held.current.delete(direction);
-      publish();
+      release(direction);
     },
-    onPointerCancel: () => {
-      held.current.delete(direction);
-      publish();
-    },
+    onPointerCancel: () => release(direction),
+    onLostPointerCapture: () => release(direction),
   });
   return (
     <div className="direction-pad" aria-label="Capsule movement controls">
@@ -607,12 +624,29 @@ function Demo() {
         </div>
         <BackendBadge />
       </section>
+      <section className="example-guide" aria-label="Included examples">
+        <article>
+          <p className="section-label">Flat field</p>
+          <strong>Read the grass clearly.</strong>
+          <span>A committed 18,000-tuft scatter isolates wind, contact, wake recovery, and preset changes.</span>
+        </article>
+        <article>
+          <p className="section-label">Island terrain</p>
+          <strong>Bring your own ground truth.</strong>
+          <span>One deterministic heightfield builds the land, grounds the capsule, supplies normals, and places the grass.</span>
+        </article>
+        <article>
+          <p className="section-label">Storygrass preset</p>
+          <strong>A look, not a renderer fork.</strong>
+          <span>Wider blades, a softer palette, and calmer wind remain ordinary preset data on the same TSL path.</span>
+        </article>
+      </section>
       <section className="docs" id="use" aria-label="Package documentation">
         <article className="install-card">
           <p className="section-label">Use from source</p>
           <h2>Bring the field, not the game.</h2>
           <pre><code>{`git clone https://github.com/matthew-kissinger/threejs-field-grass.git
-cd threejs-field-grass && npm install && npm run build`}</code></pre>
+cd threejs-field-grass && npm ci && npm run build`}</code></pre>
           <p>The npm package is intentionally unpublished. The repository includes runtime source, types, recipes, tests, and the demo.</p>
         </article>
         <div className="stat-grid" aria-label="Package facts">

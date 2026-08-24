@@ -66,6 +66,7 @@
     "capture:demo": "node tools/capture-demo.mjs",
     "capture:island": "node tools/capture-island.mjs",
     "capture:island:webgl2": "node tools/capture-island.mjs --webgl2-only",
+    "capture:release-assets": "node tools/capture-release-assets.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "prepack": "npm run check"
   },
