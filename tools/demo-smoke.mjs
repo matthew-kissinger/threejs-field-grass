@@ -39,10 +39,18 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   await page.locator('canvas').waitFor({ state: 'visible' });
   if (scene === 'island') {
     await page.getByRole('button', { name: 'Island Terrain' }).click();
-    await page.waitForTimeout(900);
+    await page.waitForFunction(
+      () => window.__FIELD_GRASS_QA__?.scene === 'island',
+      undefined,
+      { timeout: 10000 },
+    );
   } else if (scene === 'samurai') {
     await page.getByRole('button', { name: 'Emerald Dawn' }).click();
-    await page.waitForTimeout(1400);
+    await page.waitForFunction(
+      () => window.__FIELD_GRASS_QA__?.scene === 'samurai',
+      undefined,
+      { timeout: 10000 },
+    );
   }
   const canvasSize = await page.locator('canvas').evaluate((element) => ({
     width: element.width,
