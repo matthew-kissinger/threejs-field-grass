@@ -11,6 +11,7 @@ const evidence = resolve(repo, 'output', 'playwright', 'samurai-release');
 const vite = resolve(repo, 'node_modules', 'vite', 'bin', 'vite.js');
 const port = 5194;
 const renderedMotionTimeout = process.env.CI ? 30000 : 3000;
+const sceneReceiptTimeout = process.env.CI ? 30000 : 10000;
 const server = spawn(
   process.execPath,
   [vite, 'preview', '--config', 'vite.demo.config.ts', '--host', '127.0.0.1', '--port', String(port)],
@@ -44,7 +45,7 @@ async function verifySceneButtonKeyboardHandoff(browser, url) {
   await page.waitForFunction(
     () => window.__FIELD_GRASS_QA__?.scene === 'samurai',
     undefined,
-    { timeout: 10000 },
+    { timeout: sceneReceiptTimeout },
   );
   const activeElement = await page.evaluate(() => ({
     tag: document.activeElement?.tagName ?? null,
@@ -92,14 +93,14 @@ async function verify(browser, url, viewport, scene, mobile = false) {
     await page.waitForFunction(
       () => window.__FIELD_GRASS_QA__?.scene === 'island',
       undefined,
-      { timeout: 10000 },
+      { timeout: sceneReceiptTimeout },
     );
   } else if (scene === 'samurai') {
     await page.getByRole('button', { name: 'Emerald Dawn' }).click();
     await page.waitForFunction(
       () => window.__FIELD_GRASS_QA__?.scene === 'samurai',
       undefined,
-      { timeout: 10000 },
+      { timeout: sceneReceiptTimeout },
     );
   }
   const canvasSize = await page.locator('canvas').evaluate((element) => ({
