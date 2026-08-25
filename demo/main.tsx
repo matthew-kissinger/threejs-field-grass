@@ -970,7 +970,15 @@ function Demo() {
           <span>WebGPU + WebGL2</span>
         </div>
       </header>
-      <section ref={viewport} className={`viewport viewport-${sceneName}`} id="demo" aria-label="Interactive grass demo">
+      <section
+        ref={viewport}
+        className={`viewport viewport-${sceneName}`}
+        id="demo"
+        aria-label="Interactive grass demo"
+        onClickCapture={(event) => {
+          if (event.target instanceof HTMLButtonElement) event.target.blur();
+        }}
+      >
         <Canvas
           gl={createRenderer as never}
           dpr={[1, 1.6]}

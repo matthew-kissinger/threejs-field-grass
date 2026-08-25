@@ -47,7 +47,7 @@ function roleFor(name: string): keyof typeof MATERIAL_ROLES {
 }
 
 export function SamuraiAvatar({ motion }: { readonly motion: MutableRefObject<SamuraiMotionState> }) {
-  const gltf = useLoader(GLTFLoader, './assets/samurai/samurai-quaternius-sword-set.glb');
+  const gltf = useLoader(GLTFLoader, './assets/samurai/samurai-mixamo-sword-set.glb');
   const walkWeight = useRef(0);
   const attackWeight = useRef(0);
   const attackPhase = useRef<'ready' | 'active' | 'recover'>('ready');
@@ -75,18 +75,18 @@ export function SamuraiAvatar({ motion }: { readonly motion: MutableRefObject<Sa
       mesh.receiveShadow = false;
     });
     const katana = createProceduralKatanaRig();
-    const rightHand = root.getObjectByName('hand_r');
-    const leftHand = root.getObjectByName('hand_l');
-    const hips = root.getObjectByName('pelvis');
+    const rightHand = root.getObjectByName('mixamorigRightHand');
+    const leftHand = root.getObjectByName('mixamorigLeftHand');
+    const hips = root.getObjectByName('mixamorigHips');
     if (!rightHand || !leftHand || !hips) {
-      throw new Error('Samurai is missing its pelvis or weapon-hand bones.');
+      throw new Error('Mixamo samurai is missing its hips or two-hand weapon grip bones.');
     }
     const mixer = new THREE.AnimationMixer(root);
     const idleClip = gltf.animations.find((clip) => clip.name === 'SwordIdle');
     const walkClip = gltf.animations.find((clip) => clip.name === 'SwordWalk');
-    const attackClip = gltf.animations.find((clip) => clip.name === 'SwordAttack');
+    const attackClip = gltf.animations.find((clip) => clip.name === 'SwordSpinAttack');
     if (!idleClip || !walkClip || !attackClip) {
-      throw new Error('Samurai is missing SwordIdle, SwordWalk, or SwordAttack.');
+      throw new Error('Mixamo samurai is missing SwordIdle, SwordWalk, or SwordSpinAttack.');
     }
     const idleAction = mixer.clipAction(idleClip);
     const walkAction = mixer.clipAction(walkClip);

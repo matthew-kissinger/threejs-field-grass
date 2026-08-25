@@ -220,35 +220,31 @@ export function createProceduralKatanaRig(): ProceduralKatanaRig {
         .getWorldPosition(new THREE.Vector3())
         .sub(rightWorldPosition);
       if (handPlaneDirection.lengthSq() < 0.0001) {
-        throw new Error('Sword grip hands are too close to calibrate the katana socket.');
+        throw new Error('Mixamo sword grip hands are too close to calibrate the katana socket.');
       }
-      // Keep the blade clearly outboard of the silhouette. Quaternius' guard is
-      // one-handed, so it needs a stronger lateral component than the old
-      // nearly vertical great-sword calibration.
+      // Great-sword clips place the wrists on a mostly horizontal line. Preserve
+      // that line as the blade plane, but bias the hilt strongly toward world-down
+      // so the tsuka exits the right palm instead of pointing sideways.
       const handleDirectionWorld = handPlaneDirection
         .normalize()
-        .multiplyScalar(0.5)
-        .addScaledVector(new THREE.Vector3(0, -1, 0), 0.5)
+        .multiplyScalar(0.35)
+        .addScaledVector(new THREE.Vector3(0, -1, 0), 0.65)
         .normalize();
-      const inverseHandWorldRotation = rightHand.getWorldQuaternion(new THREE.Quaternion()).invert();
-      const handleDirectionLocal = handleDirectionWorld.clone().applyQuaternion(inverseHandWorldRotation);
-      const bladeUpWorld = handleDirectionWorld.clone().negate();
-      const forwardReference = new THREE.Vector3(0, 0, 1);
-      const bladeNormalWorld = forwardReference
-        .clone()
-        .addScaledVector(bladeUpWorld, -forwardReference.dot(bladeUpWorld))
-        .normalize();
-      const bladeWidthWorld = new THREE.Vector3().crossVectors(bladeUpWorld, bladeNormalWorld).normalize();
-      bladeNormalWorld.crossVectors(bladeWidthWorld, bladeUpWorld).normalize();
-      const socketWorldRotation = new THREE.Quaternion().setFromRotationMatrix(
-        new THREE.Matrix4().makeBasis(bladeWidthWorld, bladeUpWorld, bladeNormalWorld),
-      );
-      handSocket.quaternion.copy(inverseHandWorldRotation).multiply(socketWorldRotation);
-      const fingerBaseNames = ['middle_01_r'];
+      const inverseHandWorldRotation = rightHand
+        .getWorldQuaternion(new THREE.Quaternion())
+        .invert();
+      const handleDirectionLocal = handleDirectionWorld.applyQuaternion(inverseHandWorldRotation);
+      handSocket.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), handleDirectionLocal);
+      const fingerBaseNames = [
+        'mixamorigRightHandIndex1',
+        'mixamorigRightHandMiddle1',
+        'mixamorigRightHandRing1',
+        'mixamorigRightHandPinky1',
+      ];
       const palmCenterLocal = new THREE.Vector3();
       for (const boneName of fingerBaseNames) {
         const fingerBase = rightHand.getObjectByName(boneName);
-        if (!fingerBase) throw new Error(`Sword hand is missing a supported finger base (${boneName}).`);
+        if (!fingerBase) throw new Error(`Mixamo sword hand is missing ${boneName}.`);
         palmCenterLocal.add(rightHand.worldToLocal(fingerBase.getWorldPosition(new THREE.Vector3())));
       }
       // Finger-base centroid is the knuckle line. Move 58% of the wrist-to-knuckle
@@ -261,16 +257,12 @@ export function createProceduralKatanaRig(): ProceduralKatanaRig {
     calibrateHipCarry(actorRoot, hips) {
       actorRoot.updateWorldMatrix(true, false);
       hips.updateWorldMatrix(true, false);
-      const bounds = new THREE.Box3().setFromObject(actorRoot);
-      const height = Math.max(0.001, bounds.max.y - bounds.min.y);
-      const center = bounds.getCenter(new THREE.Vector3());
-      const mouthWorld = new THREE.Vector3(
-        center.x + height * 0.15,
-        bounds.min.y + height * 0.46,
-        center.z + height * 0.018,
+      const mouthActorLocal = new THREE.Vector3(0.25, 1.05, 0.04);
+      const carryDirectionActorLocal = new THREE.Vector3(0.38, -0.86, -0.34).normalize();
+      const mouthWorld = actorRoot.localToWorld(mouthActorLocal.clone());
+      const tipWorld = actorRoot.localToWorld(
+        mouthActorLocal.clone().add(carryDirectionActorLocal),
       );
-      const carryDirectionWorld = new THREE.Vector3(0.5, -0.82, -0.27).normalize();
-      const tipWorld = mouthWorld.clone().addScaledVector(carryDirectionWorld, height * 0.42);
       const mouthHipsLocal = hips.worldToLocal(mouthWorld);
       const tipHipsLocal = hips.worldToLocal(tipWorld);
       const carryDirectionHipsLocal = tipHipsLocal.sub(mouthHipsLocal).normalize();

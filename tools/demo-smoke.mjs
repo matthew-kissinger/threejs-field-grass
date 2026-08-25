@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 
 import { spawn } from 'node:child_process';
+import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const evidence = resolve(repo, 'output', 'playwright', 'samurai-release');
 const vite = resolve(repo, 'node_modules', 'vite', 'bin', 'vite.js');
 const port = 5194;
 const server = spawn(
@@ -25,6 +27,53 @@ async function waitForServer() {
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 250));
   }
   throw new Error('Demo preview did not become ready');
+}
+
+async function verifySceneButtonKeyboardHandoff(browser, url) {
+  console.log(`checking Emerald scene-button keyboard handoff: ${url}`);
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto(url, { waitUntil: 'networkidle' });
+  await page.locator('canvas').waitFor({ state: 'visible' });
+  await page.getByRole('button', { name: 'Emerald Dawn' }).click();
+  await page.waitForFunction(
+    () => window.__FIELD_GRASS_QA__?.scene === 'samurai',
+    undefined,
+    { timeout: 10000 },
+  );
+  const activeElement = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName ?? null,
+    ariaLabel: document.activeElement?.getAttribute('aria-label') ?? null,
+  }));
+  if (activeElement.tag === 'BUTTON') {
+    throw new Error(`Scene button retained keyboard focus: ${JSON.stringify(activeElement)}`);
+  }
+  const beforeMove = await page.evaluate(() => window.__FIELD_GRASS_QA__?.player);
+  if (!beforeMove) throw new Error('Missing player receipt before scene-button movement');
+  await page.keyboard.down('w');
+  await page.waitForFunction(
+    (before) => {
+      const player = window.__FIELD_GRASS_QA__?.player;
+      return !!player && Math.hypot(player.x - before.x, player.z - before.z) > 0.05;
+    },
+    beforeMove,
+    { timeout: 3000 },
+  );
+  const duringMove = await page.evaluate(() => ({
+    player: window.__FIELD_GRASS_QA__?.player,
+    animation: window.__FIELD_GRASS_QA__?.samuraiAnimation,
+  }));
+  await page.keyboard.up('w');
+  if (!duringMove.animation || duringMove.animation.active !== 'walk') {
+    throw new Error(`Scene-button handoff did not enter walk: ${JSON.stringify(duringMove.animation)}`);
+  }
+  if (errors.length > 0) throw new Error(`Scene-button browser errors:\n${errors.join('\n')}`);
+  await page.close();
+  console.log('passed Emerald scene-button keyboard handoff');
 }
 
 async function verify(browser, url, viewport, scene, mobile = false) {
@@ -257,6 +306,12 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   const textState = await page.evaluate(() => window.render_game_to_text?.());
   if (!textState || JSON.parse(textState).scene !== scene) throw new Error('Text state does not match scene');
   if (errors.length > 0) throw new Error(`Browser console errors:\n${errors.join('\n')}`);
+  if (scene === 'samurai') {
+    await mkdir(evidence, { recursive: true });
+    await page.locator('.viewport').screenshot({
+      path: resolve(evidence, `samurai-${mobile ? 'mobile' : 'desktop'}-${receipt.actualBackend}.png`),
+    });
+  }
   await page.close();
   console.log(`passed ${scene} at ${viewport.width}x${viewport.height}`);
 }
@@ -293,6 +348,7 @@ try {
     await verify(browser, defaultUrl, { width: 390, height: 844 }, 'island', true);
   }
   if (!onlyScene || onlyScene === 'samurai') {
+    await verifySceneButtonKeyboardHandoff(browser, `${defaultUrl}${defaultUrl.includes('?') ? '&' : '?'}rays=off`);
     await verify(browser, samuraiUrl, { width: 1280, height: 900 }, 'samurai');
     await verify(browser, samuraiUrl, { width: 390, height: 844 }, 'samurai', true);
   }

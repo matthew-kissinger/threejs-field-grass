@@ -29,7 +29,7 @@ grass extraction. Their terrain, controller, camera, procedural tree, katana,
 petals, moon, and post-processing code do not come from Sheepdog Sim.
 
 Emerald Dawn's character mesh is Daniel Darko's **Low-poly Samurai** under
-CC BY 4.0. Its final animation clips are retargeted from Quaternius CC0 data.
+CC BY 4.0. Its demo-only rig and final animation clips use Adobe Mixamo.
 Those demo-only sources and modifications are listed in
 `public/assets/samurai/ATTRIBUTION.md`; neither asset is part of the reusable
 library or npm package.

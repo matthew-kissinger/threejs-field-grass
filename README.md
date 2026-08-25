@@ -231,7 +231,7 @@ is not affiliated with or endorsed by the Three.js project.
 
 The library source, procedural demo systems, and generated grass data are MIT.
 Emerald Dawn also includes Daniel Darko's **Low-poly Samurai** under CC BY 4.0
-and Quaternius animation data under CC0 1.0. Full source links, modifications,
+and demo-only Mixamo rigging and animation data under Adobe's terms. Full source links, modifications,
 and notices are recorded in
 [`public/assets/samurai/ATTRIBUTION.md`](public/assets/samurai/ATTRIBUTION.md).
 Runtime and development packages retain their own licenses.
