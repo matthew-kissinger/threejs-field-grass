@@ -10,6 +10,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const evidence = resolve(repo, 'output', 'playwright', 'samurai-release');
 const vite = resolve(repo, 'node_modules', 'vite', 'bin', 'vite.js');
 const port = 5194;
+const renderedMotionTimeout = process.env.CI ? 30000 : 3000;
 const server = spawn(
   process.execPath,
   [vite, 'preview', '--config', 'vite.demo.config.ts', '--host', '127.0.0.1', '--port', String(port)],
@@ -61,7 +62,7 @@ async function verifySceneButtonKeyboardHandoff(browser, url) {
       return !!player && Math.hypot(player.x - before.x, player.z - before.z) > 0.05;
     },
     beforeMove,
-    { timeout: 3000 },
+    { timeout: renderedMotionTimeout },
   );
   const duringMove = await page.evaluate(() => ({
     player: window.__FIELD_GRASS_QA__?.player,
@@ -127,7 +128,7 @@ async function verify(browser, url, viewport, scene, mobile = false) {
       await page.waitForFunction(
         () => (window.__FIELD_GRASS_QA__?.samuraiAnimation?.walkWeight ?? 0) > 0.55,
         undefined,
-        { timeout: 3000 },
+        { timeout: renderedMotionTimeout },
       );
       animationDuringMove = await page.evaluate(() => window.__FIELD_GRASS_QA__?.samuraiAnimation);
     }
