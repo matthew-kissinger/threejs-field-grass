@@ -33,7 +33,16 @@ let browser;
 try {
   await mkdir(docsImages, { recursive: true });
   await ready();
-  browser = await chromium.launch({ channel: 'chrome', headless: true });
+  browser = await chromium.launch({
+    channel: 'chrome',
+    headless: true,
+    args: [
+      '--enable-unsafe-webgpu',
+      '--enable-webgpu-developer-features',
+      '--disable-background-timer-throttling',
+      '--disable-renderer-backgrounding',
+    ],
+  });
   const page = await browser.newPage({
     viewport: { width: 1280, height: 900 },
     deviceScaleFactor: 1,
@@ -75,6 +84,35 @@ try {
     type: 'jpeg',
     quality: 90,
   });
+
+  const emeraldPage = await browser.newPage({
+    viewport: { width: 1280, height: 900 },
+    deviceScaleFactor: 1,
+  });
+  const emeraldErrors = [];
+  emeraldPage.on('console', (message) => {
+    if (message.type() === 'error') emeraldErrors.push(message.text());
+  });
+  emeraldPage.on('pageerror', (error) => emeraldErrors.push(error.message));
+  await emeraldPage.goto(
+    `http://127.0.0.1:${port}/?backend=webgpu&scene=samurai`,
+    { waitUntil: 'networkidle' },
+  );
+  await emeraldPage.locator('canvas').waitFor({ state: 'visible' });
+  await emeraldPage.waitForTimeout(4200);
+  const emeraldReceipt = await emeraldPage.evaluate(() => window.__FIELD_GRASS_QA__);
+  if (emeraldReceipt?.actualBackend !== 'webgpu') {
+    throw new Error(`Emerald capture did not use WebGPU: ${JSON.stringify(emeraldReceipt)}`);
+  }
+  await emeraldPage.locator('.viewport').screenshot({
+    path: resolve(docsImages, 'emerald-dawn.jpg'),
+    type: 'jpeg',
+    quality: 90,
+  });
+  if (emeraldErrors.length > 0) {
+    throw new Error(`Emerald capture console errors:\n${emeraldErrors.join('\n')}`);
+  }
+  await emeraldPage.close();
 
   if (errors.length > 0) throw new Error(`Release capture console errors:\n${errors.join('\n')}`);
   console.log('captured README and social assets from the production demo');

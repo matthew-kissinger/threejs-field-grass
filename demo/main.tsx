@@ -2,6 +2,7 @@
 
 import {
   StrictMode,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -33,6 +34,28 @@ import {
   isIslandWalkable,
   type IslandHeightfield,
 } from './examples/island/terrain';
+import {
+  BlossomTree,
+  MoonlitSky,
+  PetalField,
+  StoneMarkers,
+} from './examples/samurai/EmeraldEnvironment';
+import {
+  EMERALD_MOON_DIRECTION,
+  Moon,
+  MoonGodrays,
+} from './examples/samurai/MoonlitAtmosphere';
+import {
+  requestSamuraiAttack,
+  SamuraiAvatar,
+  SamuraiController,
+  SamuraiFallback,
+  type SamuraiMotionState,
+} from './examples/samurai/SamuraiActor';
+import { EMERALD_DAWN_PRESET } from './examples/samurai/preset';
+import { createSamuraiGrassBuffers } from './examples/samurai/scatter';
+import { SamuraiTerrainView } from './examples/samurai/SamuraiTerrainView';
+import { createSamuraiHeightfield, type SamuraiHeightfield } from './examples/samurai/terrain';
 import './styles.css';
 
 const manifest = manifestJson as GrassManifest;
@@ -40,6 +63,7 @@ const response = await fetch(tuftUrl);
 if (!response.ok) throw new Error(`Grass demo scatter failed to load: ${response.status}`);
 const bytes = await response.arrayBuffer();
 const buffers = decodeTufts(bytes, manifest, groupFromManifest(manifest, 'meadow'));
+const samuraiGodraysEnabled = new URLSearchParams(window.location.search).get('rays') !== 'off';
 
 interface DemoQaReceipt {
   requestedBackend: 'webgpu' | 'webgl2';
@@ -47,12 +71,19 @@ interface DemoQaReceipt {
   scene: SceneName;
   player: { x: number; y: number; z: number };
   camera: { x: number; y: number; z: number };
+  cameraTarget: { x: number; y: number; z: number };
   draws: number;
   triangles: number;
   geometries: number;
   textures: number;
   frameP50Ms: number;
   frameP95Ms: number;
+  samuraiAnimation?: {
+    active: 'idle' | 'walk' | 'attack';
+    walkWeight: number;
+    attackWeight: number;
+    attacking: boolean;
+  };
 }
 
 declare global {
@@ -82,12 +113,14 @@ function createRenderer(props: ConstructorParameters<typeof THREE.WebGPURenderer
     if (backend.isWebGPUBackend !== true && backend.isWebGLBackend !== true) {
       throw new Error('Three.js renderer initialized an unknown backend');
     }
+    const requestedScene = new URLSearchParams(window.location.search).get('scene');
     window.__FIELD_GRASS_QA__ = {
       requestedBackend: forceWebGL ? 'webgl2' : 'webgpu',
       actualBackend,
-      scene: 'field',
+      scene: requestedScene === 'island' || requestedScene === 'samurai' ? requestedScene : 'field',
       player: { x: 0, y: 0.72, z: 0 },
       camera: { x: -24, y: 20, z: 30 },
+      cameraTarget: { x: 0, y: 0, z: 0 },
       draws: 0,
       triangles: 0,
       geometries: 0,
@@ -110,7 +143,7 @@ interface MoveIntent {
 }
 
 type LookName = 'field' | 'storybook';
-type SceneName = 'field' | 'island';
+type SceneName = 'field' | 'island' | 'samurai';
 
 interface DemoLook {
   readonly label: string;
@@ -142,61 +175,312 @@ interface CameraActions {
   reset(): void;
 }
 
-function OrbitCamera({
+// Orbit around the actor's upper torso, not above their head. This keeps close
+// third-person views composed while the wider reset still frames the hill tree.
+const SAMURAI_FOLLOW_HEIGHT = 1.65;
+
+function ThirdPersonCamera({
+  actions,
+  followPosition,
+  terrain,
+}: {
+  readonly actions: MutableRefObject<CameraActions | null>;
+  readonly followPosition: THREE.Vector3;
+  readonly terrain: SamuraiHeightfield;
+}) {
+  const { camera, gl, size } = useThree();
+  const sizeRef = useRef(size);
+  const pivot = useMemo(() => new THREE.Vector3(), []);
+  const desiredPosition = useMemo(() => new THREE.Vector3(), []);
+  const raySample = useMemo(() => new THREE.Vector3(), []);
+  const lookTarget = useMemo(() => new THREE.Vector3(), []);
+  const yaw = useRef(-0.386);
+  const pitch = useRef(0.263);
+  const distance = useRef(21.2);
+  const desiredYaw = useRef(yaw.current);
+  const desiredPitch = useRef(pitch.current);
+  const desiredDistance = useRef(distance.current);
+  sizeRef.current = size;
+
+  useEffect(() => {
+    const reset = () => {
+      const portrait = sizeRef.current.width / sizeRef.current.height < 0.78;
+      desiredYaw.current = portrait ? -0.42 : -0.386;
+      desiredPitch.current = portrait ? 0.31 : 0.263;
+      desiredDistance.current = portrait ? 24.8 : 21.2;
+      yaw.current = desiredYaw.current;
+      pitch.current = desiredPitch.current;
+      distance.current = desiredDistance.current;
+      pivot.copy(followPosition);
+      pivot.y += SAMURAI_FOLLOW_HEIGHT;
+      const horizontal = Math.cos(pitch.current) * distance.current;
+      camera.position.set(
+        pivot.x + Math.sin(yaw.current) * horizontal,
+        pivot.y + Math.sin(pitch.current) * distance.current,
+        pivot.z + Math.cos(yaw.current) * horizontal,
+      );
+      camera.lookAt(pivot);
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.fov = 48;
+        camera.updateProjectionMatrix();
+      }
+    };
+    const zoom = (factor: number) => {
+      desiredDistance.current = THREE.MathUtils.clamp(
+        desiredDistance.current * factor,
+        4.5,
+        34,
+      );
+    };
+    let activePointer: number | null = null;
+    let lastX = 0;
+    let lastY = 0;
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      activePointer = event.pointerId;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      gl.domElement.setPointerCapture?.(event.pointerId);
+      event.preventDefault();
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== activePointer) return;
+      const deltaX = event.clientX - lastX;
+      const deltaY = event.clientY - lastY;
+      lastX = event.clientX;
+      lastY = event.clientY;
+      desiredYaw.current -= deltaX * 0.0042;
+      desiredPitch.current = THREE.MathUtils.clamp(
+        desiredPitch.current + deltaY * 0.0035,
+        0.1,
+        1.08,
+      );
+      event.preventDefault();
+    };
+    const releasePointer = (event: PointerEvent) => {
+      if (event.pointerId !== activePointer) return;
+      activePointer = null;
+      if (gl.domElement.hasPointerCapture?.(event.pointerId)) {
+        gl.domElement.releasePointerCapture(event.pointerId);
+      }
+    };
+    const onWheel = (event: WheelEvent) => {
+      const viewport = gl.domElement.closest('.viewport');
+      if (!(event.target instanceof Node) || !viewport?.contains(event.target)) return;
+      event.preventDefault();
+      zoom(THREE.MathUtils.clamp(Math.exp(event.deltaY * 0.0012), 0.82, 1.22));
+    };
+    gl.domElement.addEventListener('pointerdown', onPointerDown);
+    gl.domElement.addEventListener('pointermove', onPointerMove);
+    gl.domElement.addEventListener('pointerup', releasePointer);
+    gl.domElement.addEventListener('pointercancel', releasePointer);
+    window.addEventListener('wheel', onWheel, { passive: false, capture: true });
+    actions.current = { zoom, reset };
+    reset();
+    return () => {
+      actions.current = null;
+      gl.domElement.removeEventListener('pointerdown', onPointerDown);
+      gl.domElement.removeEventListener('pointermove', onPointerMove);
+      gl.domElement.removeEventListener('pointerup', releasePointer);
+      gl.domElement.removeEventListener('pointercancel', releasePointer);
+      window.removeEventListener('wheel', onWheel, { capture: true });
+    };
+  }, [actions, camera, followPosition, gl.domElement, pivot]);
+
+  useFrame((_, dt) => {
+    const delta = Math.min(dt, 0.05);
+    pivot.x = THREE.MathUtils.damp(pivot.x, followPosition.x, 8, delta);
+    pivot.y = THREE.MathUtils.damp(
+      pivot.y,
+      followPosition.y + SAMURAI_FOLLOW_HEIGHT,
+      8,
+      delta,
+    );
+    pivot.z = THREE.MathUtils.damp(pivot.z, followPosition.z, 8, delta);
+    yaw.current = THREE.MathUtils.damp(yaw.current, desiredYaw.current, 18, delta);
+    pitch.current = THREE.MathUtils.damp(pitch.current, desiredPitch.current, 18, delta);
+    distance.current = THREE.MathUtils.damp(distance.current, desiredDistance.current, 14, delta);
+
+    const horizontal = Math.cos(pitch.current) * distance.current;
+    desiredPosition.set(
+      pivot.x + Math.sin(yaw.current) * horizontal,
+      pivot.y + Math.sin(pitch.current) * distance.current,
+      pivot.z + Math.cos(yaw.current) * horizontal,
+    );
+
+    // Spring-arm terrain collision: shorten the boom before any sample enters
+    // the rolling ground, then retain a small clearance above the surface.
+    let safeAmount = 1;
+    for (let sample = 1; sample <= 10; sample++) {
+      const amount = sample / 10;
+      raySample.lerpVectors(pivot, desiredPosition, amount);
+      if (raySample.y < terrain.heightAt(raySample.x, raySample.z) + 0.85) {
+        safeAmount = Math.max(0.18, amount - 0.1);
+        break;
+      }
+    }
+    camera.position.lerpVectors(pivot, desiredPosition, safeAmount);
+    lookTarget.copy(pivot);
+    camera.lookAt(lookTarget);
+    if (window.__FIELD_GRASS_QA__) {
+      window.__FIELD_GRASS_QA__.cameraTarget = {
+        x: pivot.x,
+        y: pivot.y,
+        z: pivot.z,
+      };
+    }
+  }, -1);
+  return null;
+}
+
+function FreeOrbitCamera({
   actions,
   scene,
+  followPosition,
 }: {
   readonly actions: MutableRefObject<CameraActions | null>;
   readonly scene: SceneName;
+  readonly followPosition?: THREE.Vector3;
 }) {
   const { camera, gl, size } = useThree();
   const controls = useMemo(() => new OrbitControls(camera, gl.domElement), [camera, gl]);
   const sizeRef = useRef(size);
+  const desiredDistance = useRef<number | null>(null);
+  const desiredTarget = useMemo(() => new THREE.Vector3(), []);
+  const followDelta = useMemo(() => new THREE.Vector3(), []);
+  const zoomOffset = useMemo(() => new THREE.Vector3(), []);
   sizeRef.current = size;
   useEffect(() => {
     controls.target.set(0, 0, 0);
+    // The third-person follow translation already has its own exponential
+    // smoothing. Orbit damping would retain a second motion state, so a zoom
+    // could change radius while an old look impulse was still rotating.
     controls.enableDamping = true;
-    controls.dampingFactor = 0.075;
+    controls.dampingFactor = scene === 'samurai' ? 0.09 : 0.075;
     controls.enablePan = false;
     controls.enableRotate = true;
-    controls.enableZoom = true;
-    controls.minDistance = 10;
-    controls.maxDistance = scene === 'island' ? 96 : 74;
-    controls.maxPolarAngle = Math.PI * 0.48;
-    controls.zoomToCursor = true;
+    // Samurai uses a radius-only wheel handler below. Letting OrbitControls
+    // process the same wheel gesture can update its spherical state and make a
+    // pure zoom look like a small orbit.
+    controls.enableZoom = scene !== 'samurai';
+    controls.minDistance = scene === 'samurai' ? 4.5 : 10;
+    controls.maxDistance = scene === 'island' ? 96 : scene === 'samurai' ? 34 : 74;
+    controls.minPolarAngle = scene === 'samurai' ? 0.22 : 0;
+    controls.maxPolarAngle = scene === 'samurai' ? Math.PI * 0.46 : Math.PI * 0.48;
+    // A third-person follow rig owns its target. Zoom-to-cursor also translates
+    // that target, so the two systems visibly tug it in opposite directions.
+    // Keep cursor zoom for free-orbit examples and radius-only zoom for samurai.
+    controls.zoomToCursor = scene !== 'samurai';
     const reset = () => {
       const currentSize = sizeRef.current;
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.fov = scene === 'samurai' ? 48 : 40;
+        camera.updateProjectionMatrix();
+      }
       if (scene === 'island') {
         if (currentSize.width / currentSize.height < 0.78) camera.position.set(-43, 32, 48);
         else camera.position.set(-31, 24, 34);
         controls.target.set(0, 1.1, 0);
+      } else if (scene === 'samurai') {
+        if (followPosition) desiredTarget.copy(followPosition);
+        else desiredTarget.set(0, 0, 7);
+        desiredTarget.y += SAMURAI_FOLLOW_HEIGHT;
+        controls.target.copy(desiredTarget);
+        if (currentSize.width / currentSize.height < 0.78) {
+          camera.position.set(-9.8, 7.6, 22.5).add(desiredTarget);
+        } else {
+          camera.position.set(-7.8, 5.4, 19.2).add(desiredTarget);
+        }
       } else {
         camera.position.set(-24, 20, 30);
         controls.target.set(0, 0, 0);
       }
       controls.update();
+      desiredDistance.current = scene === 'samurai'
+        ? camera.position.distanceTo(controls.target)
+        : null;
     };
+    const zoomByFactor = (factor: number): void => {
+      const currentDistance = desiredDistance.current
+        ?? camera.position.distanceTo(controls.target);
+      desiredDistance.current = THREE.MathUtils.clamp(
+        currentDistance * factor,
+        controls.minDistance,
+        controls.maxDistance,
+      );
+    };
+    const handleWheel = (event: WheelEvent): void => {
+      if (scene !== 'samurai') return;
+      const viewport = gl.domElement.closest('.viewport');
+      if (!(event.target instanceof Node) || !viewport?.contains(event.target)) return;
+      event.preventDefault();
+      const factor = THREE.MathUtils.clamp(Math.exp(event.deltaY * 0.0012), 0.82, 1.22);
+      zoomByFactor(factor);
+    };
+    // Capture at the window so fullscreen wrappers and UI overlays cannot
+    // swallow the wheel before the radius-only zoom path receives it.
+    window.addEventListener('wheel', handleWheel, { passive: false, capture: true });
     actions.current = {
-      zoom(factor): void {
-        const offset = camera.position.clone().sub(controls.target);
-        const distance = THREE.MathUtils.clamp(
-          offset.length() * factor,
-          controls.minDistance,
-          controls.maxDistance,
-        );
-        camera.position.copy(controls.target).add(offset.normalize().multiplyScalar(distance));
-        controls.update();
-      },
+      zoom: zoomByFactor,
       reset,
     };
     reset();
     return () => {
       actions.current = null;
+      window.removeEventListener('wheel', handleWheel, { capture: true });
       controls.dispose();
     };
-  }, [actions, camera, controls, scene]);
-  useFrame(() => controls.update(), -1);
+  }, [actions, camera, controls, desiredTarget, followPosition, gl.domElement, scene]);
+  useFrame((_, dt) => {
+    if (scene === 'samurai' && followPosition) {
+      desiredTarget.copy(followPosition);
+      desiredTarget.y += SAMURAI_FOLLOW_HEIGHT;
+      const alpha = 1 - Math.exp(-Math.min(dt, 0.05) * 7.5);
+      followDelta.subVectors(desiredTarget, controls.target).multiplyScalar(alpha);
+      controls.target.add(followDelta);
+      camera.position.add(followDelta);
+    }
+    controls.update(Math.min(dt, 0.05));
+    if (scene === 'samurai' && desiredDistance.current !== null) {
+      zoomOffset.subVectors(camera.position, controls.target);
+      if (zoomOffset.lengthSq() > 1e-8) {
+        camera.position.copy(controls.target).add(
+          zoomOffset.normalize().multiplyScalar(desiredDistance.current),
+        );
+      }
+    }
+    if (window.__FIELD_GRASS_QA__) {
+      window.__FIELD_GRASS_QA__.cameraTarget = {
+        x: controls.target.x,
+        y: controls.target.y,
+        z: controls.target.z,
+      };
+    }
+  }, -1);
   return null;
+}
+
+function OrbitCamera({
+  actions,
+  scene,
+  followPosition,
+  terrain,
+}: {
+  readonly actions: MutableRefObject<CameraActions | null>;
+  readonly scene: SceneName;
+  readonly followPosition?: THREE.Vector3;
+  readonly terrain?: SamuraiHeightfield;
+}) {
+  if (scene === 'samurai' && followPosition && terrain) {
+    return (
+      <ThirdPersonCamera
+        actions={actions}
+        followPosition={followPosition}
+        terrain={terrain}
+      />
+    );
+  }
+  return <FreeOrbitCamera actions={actions} scene={scene} followPosition={followPosition} />;
 }
 
 function CapsuleController({
@@ -410,6 +694,98 @@ function IslandMeadow({
   );
 }
 
+function SamuraiMeadow({
+  intent,
+  cameraActions,
+  reducedMotion,
+  motion,
+}: {
+  readonly intent: MutableRefObject<MoveIntent>;
+  readonly cameraActions: MutableRefObject<CameraActions | null>;
+  readonly reducedMotion: boolean;
+  readonly motion: MutableRefObject<SamuraiMotionState>;
+}) {
+  const terrain = useMemo(() => createSamuraiHeightfield(), []);
+  const samuraiBuffers = useMemo(() => createSamuraiGrassBuffers(terrain), [terrain]);
+  const interaction = useMemo(
+    () => createInteractionField({
+      minX: -32,
+      maxX: 32,
+      minZ: -32,
+      maxZ: 32,
+      maxBodies: 4,
+      ghostsPerBody: 14,
+      minGhostDistance: 0.46,
+      maxAge: 1.08,
+      ghostBirthDuration: 0.12,
+      strength: 0.66,
+      flattenRatio: 0.8,
+      lateralSpread: 0.32,
+    }),
+    [],
+  );
+  const preset = useMemo(() => reducedMotion ? {
+    ...EMERALD_DAWN_PRESET,
+    style: {
+      ...EMERALD_DAWN_PRESET.style,
+      windSpeed: 0.42,
+      flutterAmplitude: 0,
+    },
+  } : EMERALD_DAWN_PRESET, [reducedMotion]);
+  const moonLight = useMemo(() => {
+    const light = new THREE.DirectionalLight('#d7e7dc', 1.5);
+    light.target.position.set(10, 4, -18);
+    light.position.copy(light.target.position).addScaledVector(EMERALD_MOON_DIRECTION, 110);
+    light.castShadow = true;
+    light.shadow.mapSize.set(2048, 2048);
+    light.shadow.camera.left = -34;
+    light.shadow.camera.right = 34;
+    light.shadow.camera.top = 34;
+    light.shadow.camera.bottom = -34;
+    light.shadow.camera.near = 1;
+    light.shadow.camera.far = 180;
+    light.shadow.bias = -0.00012;
+    light.shadow.normalBias = 0.025;
+    return light;
+  }, []);
+  useEffect(() => () => interaction.dispose(), [interaction]);
+  useEffect(() => () => moonLight.dispose(), [moonLight]);
+  return (
+    <>
+      <color attach="background" args={['#142a2b']} />
+      <MoonlitSky />
+      <Moon />
+      <primitive object={moonLight} />
+      <primitive object={moonLight.target} />
+      {samuraiGodraysEnabled ? <MoonGodrays light={moonLight} /> : null}
+      <hemisphereLight args={['#8ba8a2', '#10271f', 0.62]} />
+      <directionalLight position={[18, 12, -20]} intensity={0.32} color="#6f93a1" />
+      <SamuraiTerrainView field={terrain} />
+      <GrassLayer
+        buffers={samuraiBuffers}
+        interaction={interaction}
+        preset={preset}
+        sunDirection={EMERALD_MOON_DIRECTION}
+        name="emerald-dawn-grass"
+      />
+      <BlossomTree field={terrain} />
+      <StoneMarkers field={terrain} />
+      <PetalField reducedMotion={reducedMotion} />
+      <SamuraiController field={interaction} terrain={terrain} intent={intent} motion={motion}>
+        <Suspense fallback={<SamuraiFallback />}>
+          <SamuraiAvatar motion={motion} />
+        </Suspense>
+      </SamuraiController>
+      <OrbitCamera
+        actions={cameraActions}
+        scene="samurai"
+        followPosition={motion.current.position}
+        terrain={terrain}
+      />
+    </>
+  );
+}
+
 function DirectionPad({ intent }: { readonly intent: MutableRefObject<MoveIntent> }) {
   const held = useRef(new Set<string>());
   const publish = () => {
@@ -467,10 +843,19 @@ function DirectionPad({ intent }: { readonly intent: MutableRefObject<MoveIntent
 
 function Demo() {
   const intent = useRef<MoveIntent>({ x: 0, z: 0 });
+  const samuraiMotion = useRef<SamuraiMotionState>({
+    moving: false,
+    position: new THREE.Vector3(0, 0, 7),
+    attackRequest: 0,
+    attacking: false,
+  });
   const cameraActions = useRef<CameraActions | null>(null);
   const viewport = useRef<HTMLElement>(null);
   const [lookName, setLookName] = useState<LookName>('field');
-  const [sceneName, setSceneName] = useState<SceneName>('field');
+  const [sceneName, setSceneName] = useState<SceneName>(() => {
+    const requested = new URLSearchParams(window.location.search).get('scene');
+    return requested === 'island' || requested === 'samurai' ? requested : 'field';
+  });
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [fullscreenSupported, setFullscreenSupported] = useState(false);
@@ -580,38 +965,53 @@ function Demo() {
           <a href="https://github.com/matthew-kissinger/threejs-field-grass">View on GitHub</a>
         </div>
         <div className="facts" aria-label="Demo facts">
-          <span>18,000 demo tufts</span>
+          <span>3 interactive scenes</span>
           <span>1 draw per layer</span>
           <span>WebGPU + WebGL2</span>
         </div>
       </header>
-      <section ref={viewport} className="viewport" id="demo" aria-label="Interactive grass demo">
+      <section ref={viewport} className={`viewport viewport-${sceneName}`} id="demo" aria-label="Interactive grass demo">
         <Canvas
           gl={createRenderer as never}
           dpr={[1, 1.6]}
-          camera={{ position: [-24, 20, 30], fov: 40, near: 0.1, far: 180 }}
-          shadows={false}
+          camera={{ position: [-24, 20, 30], fov: 40, near: 0.1, far: 220 }}
+          shadows={{ type: THREE.PCFSoftShadowMap }}
           fallback={<p className="canvas-fallback">This browser cannot start the 3D renderer.</p>}
         >
           <RendererReceipt />
           {sceneName === 'field' ? (
             <Meadow intent={intent} cameraActions={cameraActions} look={look} />
-          ) : (
+          ) : sceneName === 'island' ? (
             <IslandMeadow intent={intent} cameraActions={cameraActions} look={look} />
+          ) : (
+            <SamuraiMeadow
+              intent={intent}
+              cameraActions={cameraActions}
+              reducedMotion={reducedMotion}
+              motion={samuraiMotion}
+            />
           )}
         </Canvas>
         <div className="demo-toolbar" aria-label="Demo controls">
           <div className="scene-switch" role="group" aria-label="Example scene">
             <button
               type="button"
+              aria-label="Flat Field"
               aria-pressed={sceneName === 'field'}
               onClick={() => setSceneName('field')}
-            >Flat Field</button>
+            >Field</button>
             <button
               type="button"
+              aria-label="Island Terrain"
               aria-pressed={sceneName === 'island'}
               onClick={() => setSceneName('island')}
-            >Island Terrain</button>
+            >Island</button>
+            <button
+              type="button"
+              aria-label="Emerald Dawn"
+              aria-pressed={sceneName === 'samurai'}
+              onClick={() => setSceneName('samurai')}
+            >Emerald</button>
           </div>
           <div className="view-buttons" role="group" aria-label="View controls">
             <button type="button" aria-label="Zoom out" onClick={() => cameraActions.current?.zoom(1.2)}>−</button>
@@ -625,7 +1025,7 @@ function Demo() {
               onClick={() => void toggleFullscreen()}
             >{isFullscreen ? 'Exit' : 'Full'}</button>
           </div>
-          <div className="look-switch" role="group" aria-label="Grass look">
+          {sceneName !== 'samurai' && <div className="look-switch" role="group" aria-label="Grass look">
             {(Object.keys(LOOKS) as LookName[]).map((name) => (
               <button
                 type="button"
@@ -634,14 +1034,30 @@ function Demo() {
                 onClick={() => setLookName(name)}
               >{LOOKS[name].label}</button>
             ))}
-          </div>
+          </div>}
         </div>
         <DirectionPad intent={intent} />
+        {sceneName === 'samurai' && (
+          <button
+            className="attack-button"
+            type="button"
+            aria-label="Spin attack"
+            onClick={() => requestSamuraiAttack(samuraiMotion)}
+          >Attack</button>
+        )}
         <div className="demo-help">
           <p>
-            <strong>{sceneName === 'island' ? 'Island' : 'Move + orbit'}</strong>{' '}
-            <span className="help-long">WASD or arrows move while you drag. Wheel or pinch to zoom.</span>
-            <span className="help-short">Pad moves. Drag orbits; pinch zooms.</span>
+            <strong>{sceneName === 'island' ? 'Island' : sceneName === 'samurai' ? 'Emerald Dawn' : 'Move + orbit'}</strong>{' '}
+            <span className="help-long">
+              {sceneName === 'samurai'
+                ? 'WASD moves. Space or F attacks. Drag to orbit; wheel to zoom.'
+                : 'WASD or arrows move while you drag. Wheel or pinch to zoom.'}
+            </span>
+            <span className="help-short">
+              {sceneName === 'samurai'
+                ? 'Pad moves. Attack strikes. Drag to look.'
+                : 'Pad moves. Drag orbits; pinch zooms.'}
+            </span>
           </p>
         </div>
         <PerformanceBadge />
@@ -659,9 +1075,9 @@ function Demo() {
           <span>One deterministic heightfield builds the land, grounds the capsule, supplies normals, and places the grass.</span>
         </article>
         <article>
-          <p className="section-label">Storygrass preset</p>
-          <strong>A look, not a renderer fork.</strong>
-          <span>Wider blades, a softer palette, and calmer wind remain ordinary preset data on the same TSL path.</span>
+          <p className="section-label">Emerald dawn</p>
+          <strong>Put a character in the field.</strong>
+          <span>Longer blades, terrain, petals, and a credited CC-BY samurai stay on the same interaction and material path.</span>
         </article>
       </section>
       <section className="docs" id="use" aria-label="Package documentation">
@@ -733,12 +1149,13 @@ const groups = generateScatter(recipe, (x, z) => ({
       <footer>
         <div>
           <strong>Three.js Field Grass</strong>
-          <span>MIT licensed by Matthew Kissinger.</span>
+          <span>Library code MIT licensed by Matthew Kissinger.</span>
           <span>Independent community project; not affiliated with or endorsed by Three.js.</span>
         </div>
         <div className="footer-links">
           <a href="https://github.com/matthew-kissinger/threejs-field-grass">Source</a>
           <a href="https://github.com/matthew-kissinger/threejs-field-grass/blob/main/LICENSE">License</a>
+          <a href="./assets/samurai/ATTRIBUTION.md">Third-party notices</a>
           <a href="https://github.com/matthew-kissinger/threejs-field-grass/blob/main/SECURITY.md">Security</a>
           <a href="https://github.com/matthew-kissinger/threejs-field-grass/blob/main/CONTRIBUTING.md">Contributing</a>
           <a href="https://github.com/matthew-kissinger/threejs-field-grass/blob/main/CHANGELOG.md">Changelog</a>

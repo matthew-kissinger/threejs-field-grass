@@ -21,3 +21,15 @@ under MIT. No Sheepdog Sim visual or audio asset was copied.
 Herd's `density.ts` remains a game policy. The standalone decoder already
 supports prefix count and horizontal spread, so it does not need a fixed
 desktop/mobile preset table.
+
+## Standalone demo additions
+
+The island and Emerald Dawn scenes were written for this repository after the
+grass extraction. Their terrain, controller, camera, procedural tree, katana,
+petals, moon, and post-processing code do not come from Sheepdog Sim.
+
+Emerald Dawn's character mesh is Daniel Darko's **Low-poly Samurai** under
+CC BY 4.0. Its final animation clips are retargeted from Quaternius CC0 data.
+Those demo-only sources and modifications are listed in
+`public/assets/samurai/ATTRIBUTION.md`; neither asset is part of the reusable
+library or npm package.

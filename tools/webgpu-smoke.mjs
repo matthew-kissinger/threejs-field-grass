@@ -11,6 +11,11 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const vite = resolve(repo, 'node_modules', 'vite', 'bin', 'vite.js');
 const output = resolve(repo, 'output', 'playwright', 'webgpu');
 const headed = process.argv.includes('--headed');
+const sceneArgument = process.argv.find((argument) => argument.startsWith('--scene='));
+const scene = sceneArgument?.slice('--scene='.length) ?? 'field';
+if (!['field', 'island', 'samurai'].includes(scene)) {
+  throw new Error(`Unsupported WebGPU smoke scene: ${scene}`);
+}
 
 async function reservePort() {
   const probe = createServer();
@@ -63,9 +68,14 @@ try {
     if (message.type() === 'error') errors.push(message.text());
   });
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${port}/?backend=webgpu`, { waitUntil: 'networkidle' });
+  await page.goto(
+    `http://127.0.0.1:${port}/?backend=webgpu&scene=${scene}`,
+    { waitUntil: 'networkidle' },
+  );
   await page.locator('canvas').waitFor({ state: 'visible' });
-  await page.waitForTimeout(1200);
+  // Let WebGPU pipelines compile and the rolling frame-time window discard
+  // first-frame shader warm-up before recording performance evidence.
+  await page.waitForTimeout(scene === 'samurai' ? 4200 : 1800);
   const evidence = await page.evaluate(async () => {
     const adapter = navigator.gpu ? await navigator.gpu.requestAdapter() : null;
     const info = adapter?.info;
@@ -87,10 +97,36 @@ try {
     throw new Error(`WebGPU renderer fell back; strict receipt failed: ${JSON.stringify(evidence)}`);
   }
   if (errors.length > 0) throw new Error(`WebGPU console errors:\n${errors.join('\n')}`);
-  await page.locator('.viewport').screenshot({
-    path: resolve(output, `field-native-chrome-${headed ? 'headed' : 'headless'}.png`),
+  const viewport = page.locator('.viewport');
+  await viewport.screenshot({
+    path: resolve(output, `${scene}-native-chrome-${headed ? 'headed' : 'headless'}.png`),
   });
-  console.log(JSON.stringify({ headed, ...evidence }, null, 2));
+  let cameraMotion = null;
+  if (scene === 'samurai') {
+    const box = await page.locator('canvas').boundingBox();
+    if (!box) throw new Error('Could not measure the samurai canvas');
+    const sampleCamera = () => page.evaluate(() => ({
+      camera: window.__FIELD_GRASS_QA__?.camera,
+      target: window.__FIELD_GRASS_QA__?.cameraTarget,
+    }));
+    const initial = await sampleCamera();
+    const startX = box.x + box.width * 0.52;
+    const startY = box.y + box.height * 0.48;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 230, startY - 24, { steps: 24 });
+    await page.mouse.up();
+    await page.waitForTimeout(1200);
+    const orbited = await sampleCamera();
+    await viewport.screenshot({ path: resolve(output, 'samurai-orbited.png') });
+    await page.mouse.move(startX, startY);
+    await page.mouse.wheel(0, -520);
+    await page.waitForTimeout(1000);
+    const zoomed = await sampleCamera();
+    await viewport.screenshot({ path: resolve(output, 'samurai-orbited-zoomed.png') });
+    cameraMotion = { initial, orbited, zoomed };
+  }
+  console.log(JSON.stringify({ headed, scene, ...evidence, cameraMotion }, null, 2));
 } finally {
   await browser?.close();
   server.kill();

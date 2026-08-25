@@ -22,3 +22,8 @@ at build time or runtime.
 
 Never regenerate Sheepdog's committed grass scatter merely to make a test pass.
 A changed binary is a visual and deterministic decision.
+
+The standalone `demo/examples/island`, `demo/examples/samurai`, reference
+images, and `public/assets/samurai` are presentation examples, not part of the
+vendoring surface. In particular, do not copy the third-party character or its
+animation runtime into Sheepdog Sim as part of a grass update.

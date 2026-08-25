@@ -40,6 +40,9 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   if (scene === 'island') {
     await page.getByRole('button', { name: 'Island Terrain' }).click();
     await page.waitForTimeout(900);
+  } else if (scene === 'samurai') {
+    await page.getByRole('button', { name: 'Emerald Dawn' }).click();
+    await page.waitForTimeout(1400);
   }
   const canvasSize = await page.locator('canvas').evaluate((element) => ({
     width: element.width,
@@ -51,6 +54,7 @@ async function verify(browser, url, viewport, scene, mobile = false) {
     throw new Error(`Blank canvas dimensions: ${JSON.stringify(canvasSize)}`);
   }
   const beforeMove = await page.evaluate(() => window.__FIELD_GRASS_QA__?.player);
+  let animationDuringMove;
   if (mobile) {
     const forward = page.getByRole('button', { name: 'Move forward' });
     await forward.dispatchEvent('pointerdown', {
@@ -58,7 +62,18 @@ async function verify(browser, url, viewport, scene, mobile = false) {
       pointerType: 'touch',
       isPrimary: true,
     });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(scene === 'samurai' ? 650 : 300);
+    if (scene === 'samurai') {
+      // Software-headless mobile WebGPU can render only a handful of frames in
+      // 650 ms. Assert the blend once animation time, rather than wall time,
+      // has advanced far enough to cross the authored walk threshold.
+      await page.waitForFunction(
+        () => (window.__FIELD_GRASS_QA__?.samuraiAnimation?.walkWeight ?? 0) > 0.55,
+        undefined,
+        { timeout: 3000 },
+      );
+      animationDuringMove = await page.evaluate(() => window.__FIELD_GRASS_QA__?.samuraiAnimation);
+    }
     await forward.dispatchEvent('pointercancel', {
       pointerId: 11,
       pointerType: 'touch',
@@ -79,10 +94,52 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   await page.mouse.up();
   if (!mobile) {
     await page.waitForTimeout(300);
+    if (scene === 'samurai') {
+      animationDuringMove = await page.evaluate(() => window.__FIELD_GRASS_QA__?.samuraiAnimation);
+    }
     await page.keyboard.up('w');
   }
   await page.getByRole('button', { name: 'Zoom in' }).click();
   await page.getByRole('button', { name: 'Reset view' }).click();
+  if (scene === 'samurai') {
+    await page.waitForTimeout(180);
+    const beforeWheel = await page.evaluate(() => window.__FIELD_GRASS_QA__);
+    if (!beforeWheel) throw new Error('Missing samurai camera receipt before wheel zoom');
+    const pivot = {
+      x: beforeWheel.player.x,
+      // QA player Y is ground + 1; the third-person target is ground + 1.65.
+      y: beforeWheel.player.y + 0.65,
+      z: beforeWheel.player.z,
+    };
+    const ray = [
+      beforeWheel.camera.x - pivot.x,
+      beforeWheel.camera.y - pivot.y,
+      beforeWheel.camera.z - pivot.z,
+    ];
+    const rayLength = Math.hypot(...ray);
+    const unitRay = ray.map((value) => value / rayLength);
+    await page.mouse.move(bounds.x + bounds.width * 0.78, bounds.y + bounds.height * 0.4);
+    await page.mouse.wheel(0, -480);
+    await page.waitForTimeout(180);
+    const afterWheel = await page.evaluate(() => window.__FIELD_GRASS_QA__);
+    if (!afterWheel) throw new Error('Missing samurai camera receipt after wheel zoom');
+    const zoomedRay = [
+      afterWheel.camera.x - pivot.x,
+      afterWheel.camera.y - pivot.y,
+      afterWheel.camera.z - pivot.z,
+    ];
+    const alongRay = zoomedRay.reduce(
+      (sum, value, index) => sum + value * unitRay[index],
+      0,
+    );
+    const lateralDrift = Math.hypot(...zoomedRay.map(
+      (value, index) => value - unitRay[index] * alongRay,
+    ));
+    if (lateralDrift > 0.05) {
+      throw new Error(`Third-person wheel zoom fought the follow target: ${lateralDrift.toFixed(3)}m drift`);
+    }
+    await page.getByRole('button', { name: 'Reset view' }).click();
+  }
   if (!mobile && scene === 'field') {
     await page.getByRole('button', { name: 'Enter fullscreen' }).click();
     await page.waitForFunction(() => document.fullscreenElement?.classList.contains('viewport'));
@@ -127,7 +184,7 @@ async function verify(browser, url, viewport, scene, mobile = false) {
     await page.getByRole('button', { name: 'Exit fullscreen' }).click();
     await page.waitForFunction(() => document.fullscreenElement === null);
   }
-  await page.getByRole('button', { name: 'Storygrass' }).click();
+  if (scene !== 'samurai') await page.getByRole('button', { name: 'Storygrass' }).click();
   await page.locator('.backend-badge').waitFor();
   await page.locator('.fps-badge').waitFor();
   await page.waitForTimeout(550);
@@ -141,6 +198,41 @@ async function verify(browser, url, viewport, scene, mobile = false) {
     receipt.player.x - beforeMove.x,
     receipt.player.z - beforeMove.z,
   ) < 0.05) throw new Error('Capsule did not move across the selected scene');
+  if (scene === 'samurai') {
+    if (!animationDuringMove || animationDuringMove.active !== 'walk' || animationDuringMove.walkWeight < 0.5) {
+      throw new Error(`Samurai did not blend into its walk clip: ${JSON.stringify(animationDuringMove)}`);
+    }
+    if (!receipt.samuraiAnimation || receipt.samuraiAnimation.active !== 'idle' || receipt.samuraiAnimation.walkWeight > 0.25) {
+      throw new Error(`Samurai did not recover its idle clip: ${JSON.stringify(receipt.samuraiAnimation)}`);
+    }
+    const beforeAttack = { ...receipt.player };
+    if (mobile) await page.getByRole('button', { name: 'Spin attack' }).dispatchEvent('click');
+    else {
+      await page.evaluate(() => {
+        if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+      });
+      await page.keyboard.press('Space');
+    }
+    await page.waitForTimeout(300);
+    const duringAttack = await page.evaluate(() => ({
+      animation: window.__FIELD_GRASS_QA__?.samuraiAnimation,
+      player: window.__FIELD_GRASS_QA__?.player,
+    }));
+    if (
+      !duringAttack.animation
+      || duringAttack.animation.active !== 'attack'
+      || !duringAttack.animation.attacking
+      || duringAttack.animation.attackWeight < 0.5
+    ) {
+      throw new Error(`Samurai did not enter its one-shot attack: ${JSON.stringify(duringAttack.animation)}`);
+    }
+    if (!duringAttack.player || Math.hypot(
+      duringAttack.player.x - beforeAttack.x,
+      duringAttack.player.z - beforeAttack.z,
+    ) > 0.03) {
+      throw new Error('Controller moved the samurai through the world during its in-place attack');
+    }
+  }
   if (mobile) {
     const stoppedAt = { ...receipt.player };
     await page.waitForTimeout(180);
@@ -171,15 +263,37 @@ try {
   const defaultUrl = browserBackend === 'webgl2'
     ? `http://127.0.0.1:${port}/?backend=webgl2`
     : `http://127.0.0.1:${port}/`;
+  const samuraiUrl = browserBackend === 'webgl2'
+    ? `http://127.0.0.1:${port}/?backend=webgl2&scene=samurai&rays=off`
+    // Gameplay/controller coverage runs without the expensive atmosphere graph
+    // in software-headless Chrome. Native hardware WebGPU ray quality and
+    // motion are covered separately by tools/webgpu-smoke.mjs.
+    : `http://127.0.0.1:${port}/?scene=samurai&rays=off`;
+  const onlyScene = process.env.FIELD_GRASS_SMOKE_SCENE;
+  if (onlyScene && !['field', 'island', 'samurai'].includes(onlyScene)) {
+    throw new Error(`Unsupported FIELD_GRASS_SMOKE_SCENE: ${onlyScene}`);
+  }
   browser = await chromium.launch({ headless: true, args: [
     '--enable-unsafe-webgpu',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
   ] });
-  await verify(browser, defaultUrl, { width: 1280, height: 900 }, 'field');
-  await verify(browser, defaultUrl, { width: 390, height: 844 }, 'island', true);
-  await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 1280, height: 900 }, 'island');
-  await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 390, height: 844 }, 'field', true);
+  if (!onlyScene || onlyScene === 'field') {
+    await verify(browser, defaultUrl, { width: 1280, height: 900 }, 'field');
+  }
+  if (!onlyScene || onlyScene === 'island') {
+    await verify(browser, defaultUrl, { width: 390, height: 844 }, 'island', true);
+  }
+  if (!onlyScene || onlyScene === 'samurai') {
+    await verify(browser, samuraiUrl, { width: 1280, height: 900 }, 'samurai');
+    await verify(browser, samuraiUrl, { width: 390, height: 844 }, 'samurai', true);
+  }
+  if (!onlyScene || onlyScene === 'island') {
+    await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 1280, height: 900 }, 'island');
+  }
+  if (!onlyScene || onlyScene === 'field') {
+    await verify(browser, `http://127.0.0.1:${port}/?backend=webgl2`, { width: 390, height: 844 }, 'field', true);
+  }
   console.log('demo browser smoke passed');
 } finally {
   await browser?.close();

@@ -3,11 +3,11 @@
 Interactive TSL grass for Three.js games: deterministic scatter, painterly wind,
 and responsive body wakes through one WebGPU/WebGL2 material path.
 
-| Flat field | Island terrain |
-| --- | --- |
-| ![A dense interactive grass field with a capsule moving through it](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/flat-field.jpg) | ![The same grass system integrated on deterministic island terrain](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/island-terrain.jpg) |
+| Flat field | Island terrain | Emerald Dawn |
+| --- | --- | --- |
+| ![A dense interactive grass field with a capsule moving through it](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/flat-field.jpg) | ![The same grass system integrated on deterministic island terrain](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/island-terrain.jpg) | ![A moonlit samurai crossing long interactive grass beneath a blossom tree](https://raw.githubusercontent.com/matthew-kissinger/threejs-field-grass/main/docs/images/emerald-dawn.jpg) |
 
-Both images are captured from the production demo by
+All three images are captured from the production demo by
 `npm run capture:release-assets`; the committed script is their reproducible recipe.
 
 ## Features
@@ -19,12 +19,18 @@ The package combines four small systems:
 - a TSL-only material with three-octave wind and golden-hour colour
 - a bounded directional deformation field that gives moving bodies a settling wake
 
-There are no image assets, downloaded models, runtime random placement, shader
-forks, or sibling-repository imports. The core API is plain Three.js. A thin
-React Three Fiber adapter is available at `threejs-field-grass/react`.
+The reusable grass package has no image assets, downloaded models, runtime
+random placement, shader forks, or sibling-repository imports. The core API is
+plain Three.js. A thin React Three Fiber adapter is available at
+`threejs-field-grass/react`.
 
-The demo includes both a flat field and a compact island terrain example.
-Its controls and terrain code are intentionally separate from both entry points.
+The demo includes a flat field, a compact island terrain, and Emerald Dawn: a
+third-person character showcase with long grass, a procedural blossom tree,
+petals, a procedural katana, and moon shafts. Emerald's credited character and
+CC0 animation data are demo-only and documented in
+[`public/assets/samurai/ATTRIBUTION.md`](public/assets/samurai/ATTRIBUTION.md).
+Its controls, terrain, character, and presentation code are intentionally
+separate from both package entry points.
 OrbitControls, keyboard handling, and the touch direction pad are examples, not
 runtime dependencies or public package API.
 
@@ -65,6 +71,12 @@ without a usable WebGPU adapter fall back automatically through `WebGPURenderer`
 Run `npm run test:webgpu` for a strict installed-Chrome WebGPU receipt. That
 command fails if Three.js silently selects its WebGL2 fallback, even when the
 browser exposes `navigator.gpu`.
+
+Switch to **Emerald Dawn** for the third-person example. WASD moves the samurai,
+Space or F attacks, drag orbits the follow camera, and the wheel changes only
+the spring-arm distance. Its moon shafts combine a world-space directional
+shadow volume with a depth-marched screen-space scattering pass; tree geometry
+carves the light while the projected moon direction keeps the effect anchored.
 
 ## Core Three.js API
 
@@ -217,6 +229,9 @@ MIT. Copyright 2026 Matthew Kissinger.
 Three.js is used descriptively. This is an independent community project and
 is not affiliated with or endorsed by the Three.js project.
 
-All committed visual data is procedurally generated from source in this repo.
-There are no third-party art or audio assets. Runtime and development packages
-retain their own licenses.
+The library source, procedural demo systems, and generated grass data are MIT.
+Emerald Dawn also includes Daniel Darko's **Low-poly Samurai** under CC BY 4.0
+and Quaternius animation data under CC0 1.0. Full source links, modifications,
+and notices are recorded in
+[`public/assets/samurai/ATTRIBUTION.md`](public/assets/samurai/ATTRIBUTION.md).
+Runtime and development packages retain their own licenses.
