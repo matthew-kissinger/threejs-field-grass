@@ -309,8 +309,11 @@ async function verify(browser, url, viewport, scene, mobile = false) {
   if (errors.length > 0) throw new Error(`Browser console errors:\n${errors.join('\n')}`);
   if (scene === 'samurai') {
     await mkdir(evidence, { recursive: true });
-    await page.locator('.viewport').screenshot({
+    const viewportBounds = await page.locator('.viewport').boundingBox();
+    if (!viewportBounds) throw new Error('Samurai viewport has no bounds for evidence capture');
+    await page.screenshot({
       path: resolve(evidence, `samurai-${mobile ? 'mobile' : 'desktop'}-${receipt.actualBackend}.png`),
+      clip: viewportBounds,
     });
   }
   await page.close();
